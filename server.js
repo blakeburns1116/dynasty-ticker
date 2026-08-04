@@ -8,6 +8,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import * as scorewatch from "./scorewatch.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,6 +42,7 @@ const readJson = (f, fallback) => {
 };
 const getMembers = () => readJson("members.json", { members: [] }).members;
 const getSchedule = () => readJson("schedule.json", { week: 0, matchups: [] });
+const getStandings = () => readJson("standings.json", { teams: {} });
 
 // ---------- session log (append-only JSON) ----------
 // Each record: { twitch, coach, team, game, title, startedAt, lastSeen, week }
@@ -201,14 +203,37 @@ function mockStreams(logins) {
 
 // ---------- web server ----------
 const app = express();
+app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
-app.get("/api/live", (_req, res) => res.json(liveSnapshot));
+
+// Live board, with any score readings merged in.
+app.get("/api/live", (_req, res) =>
+  res.json({ ...liveSnapshot, streams: scorewatch.decorate(liveSnapshot.streams) })
+);
 app.get("/api/weekly", (_req, res) => res.json(weeklyRollup()));
 app.get("/api/schedule", (_req, res) => res.json(getSchedule()));
 app.get("/api/members", (_req, res) => res.json({ members: getMembers() }));
+app.get("/api/standings", (_req, res) => res.json(getStandings()));
+
+// Completed games (auto-archived when a stream ends).
+app.get("/api/finals", (_req, res) => res.json({ finals: scorewatch.getFinals() }));
+app.post("/api/final/:id", (req, res) => res.json(scorewatch.editFinal(req.params.id, req.body || {}) || {}));
+app.delete("/api/final/:id", (req, res) => { scorewatch.removeFinal(req.params.id); res.json({ ok: true }); });
+
+// Manual live score override (always beats the camera read until cleared).
+app.post("/api/score/:twitch", (req, res) => {
+  res.json(scorewatch.setManual(req.params.twitch, req.body || {}));
+});
+app.delete("/api/score/:twitch", (req, res) => {
+  scorewatch.clearScore(req.params.twitch);
+  res.json({ ok: true });
+});
+
+scorewatch.initStore(DATA_DIR);
 
 app.listen(PORT, () => {
   console.log(`Dynasty Ticker running at http://localhost:${PORT}  ${MOCK ? "(MOCK MODE)" : ""}`);
   poll();
   setInterval(poll, POLL_SECONDS * 1000);
+  scorewatch.startLoop(() => liveSnapshot.streams);
 });

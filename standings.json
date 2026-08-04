@@ -1,0 +1,5 @@
+{
+  "_comment": "Rank/record feature is off. The cards read this file and show nothing when it's empty. If you ever want rank + record next to team names, fill entries like \"Texas\": { \"rank\": 24, \"record\": \"2-3\" } and they'll appear automatically.",
+  "updated": "",
+  "teams": {}
+}
