@@ -206,10 +206,16 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// Live board, with any score readings merged in.
-app.get("/api/live", (_req, res) =>
-  res.json({ ...liveSnapshot, streams: scorewatch.decorate(liveSnapshot.streams) })
-);
+// Live board. Only streams CONFIRMED to be this dynasty are shown — i.e. a
+// scoreboard read (or manual entry) matched the coach's assigned team. This keeps
+// out other dynasties the same coaches stream in the same game.
+app.get("/api/live", (_req, res) => {
+  const decorated = scorewatch.decorate(liveSnapshot.streams);
+  const confirmed = decorated
+    .filter(s => s.score && s.score.dynastyConfirmed)
+    .map(s => ({ ...s, onDynasty: true }));
+  res.json({ updatedAt: liveSnapshot.updatedAt, streams: confirmed });
+});
 app.get("/api/weekly", (_req, res) => res.json(weeklyRollup()));
 app.get("/api/schedule", (_req, res) => res.json(getSchedule()));
 app.get("/api/members", (_req, res) => res.json({ members: getMembers() }));

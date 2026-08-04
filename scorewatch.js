@@ -14,6 +14,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
+import { scoreConfirmsTeam } from "./teams.js";
 
 const execFileP = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -108,6 +109,7 @@ export function setManual(login, data) {
     coach: data.coach ?? prev.coach ?? null,
     team: prev.team ?? null,
     startedAt: prev.startedAt ?? null,
+    dynastyConfirmed: true, // a human entering a score vouches it's this dynasty
   };
   persist();
   return scores[login];
@@ -154,9 +156,12 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
         const r = await readOne(login, frameFor ? frameFor(login) : null);
         if (r.ok && (r.confidence ?? 0) >= MIN_CONF) {
           const st = liveByLogin.get(login) || {};
+          // sticky: once a read shows their team, stay confirmed for the session
+          const confirmed = scores[login]?.dynastyConfirmed || scoreConfirmsTeam(r, st.team);
           scores[login] = {
             ...r, source: "cv", updatedAt: new Date().toISOString(),
             coach: st.coach || null, team: st.team || null, startedAt: st.startedAt || null,
+            dynastyConfirmed: !!confirmed,
           };
         }
         // if not ok (menu/replay), we keep the last reading; staleness handled on read
@@ -166,11 +171,12 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
     }));
   }
 
-  // a scored stream that is no longer live = game over -> move it to Final
+  // a CONFIRMED dynasty stream that is no longer live = game over -> Final.
+  // unconfirmed reads (other dynasties) are discarded, never archived.
   for (const login of Object.keys(scores)) {
     if (!liveByLogin.has(login)) {
       const sc = scores[login];
-      if (sc.awayScore != null || sc.homeScore != null) archiveFinal(login, sc);
+      if (sc.dynastyConfirmed && (sc.awayScore != null || sc.homeScore != null)) archiveFinal(login, sc);
       delete scores[login];
     }
   }
