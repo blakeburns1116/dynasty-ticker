@@ -3,145 +3,367 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Dynasty Ticker</title>
+<title>Dynasty Live</title>
 <style>
   :root {
-    --bg:#0d1117; --card:#161b22; --line:#21262d; --text:#e6edf3;
-    --muted:#8b949e; --accent:#f85149; --live:#3fb950; --dim:#30363d; --gold:#e3b341;
+    --bg:#0b1020; --bg2:#121a30; --card:#ffffff; --ink:#0e1526; --muted:#6b7488;
+    --line:#e7ebf3; --live:#e11d48; --good:#16a34a; --warn:#d97706; --chip:#f1f4fa;
+    --shadow:0 6px 20px rgba(9,14,30,.10);
   }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text);
-    font:15px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
-  header { padding:18px 20px; border-bottom:1px solid var(--line);
-    display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-  h1 { font-size:20px; margin:0; letter-spacing:.3px; }
-  .pill { font-size:12px; color:var(--muted); }
-  .live-dot { width:9px; height:9px; border-radius:50%; background:var(--live);
-    display:inline-block; margin-right:5px; animation:pulse 1.6s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
-  nav { display:flex; gap:6px; padding:12px 20px 0; }
-  nav button { background:none; border:1px solid var(--line); color:var(--muted);
-    padding:8px 14px; border-radius:8px 8px 0 0; cursor:pointer; font-size:14px; }
-  nav button.active { background:var(--card); color:var(--text); border-bottom-color:var(--card); }
-  main { padding:16px 20px 40px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
-  .card.on a { color:var(--live); }
-  .card h3 { margin:0 0 2px; font-size:16px; }
-  .card .team { color:var(--muted); font-size:13px; }
-  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px;
-    border:1px solid var(--line); color:var(--muted); margin-top:8px; }
-  .tag.dyn { color:var(--live); border-color:var(--live); }
-  .tag.off { color:var(--gold); border-color:var(--gold); }
-  .title { color:var(--muted); font-size:13px; margin:8px 0 0; }
-  .meta { display:flex; gap:14px; margin-top:10px; font-size:13px; color:var(--muted); }
-  a { color:var(--text); text-decoration:none; }
-  a:hover { text-decoration:underline; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; }
+  body {
+    background:linear-gradient(180deg,#0b1020 0,#0b1020 220px,#eef1f7 220px,#eef1f7 100%);
+    color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh;
+  }
+  .wrap { max-width:1120px; margin:0 auto; padding:0 16px 48px; }
+
+  /* header */
+  header { padding:22px 4px 16px; color:#fff; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .brand h1 { margin:0; font-size:26px; font-weight:800; letter-spacing:-.3px; }
+  .brand .ball { font-size:26px; }
+  .sub { margin:6px 0 0 2px; color:#9fb0d0; font-size:14px; font-weight:500; }
+  .livecount { margin-left:auto; background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
+    color:#fff; padding:7px 13px; border-radius:999px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:7px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--live); box-shadow:0 0 0 0 rgba(225,29,72,.6); animation:pulse 1.5s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(225,29,72,.55)} 70%{box-shadow:0 0 0 8px rgba(225,29,72,0)} 100%{box-shadow:0 0 0 0 rgba(225,29,72,0)} }
+
+  /* tabs */
+  nav { display:flex; gap:6px; background:rgba(255,255,255,.12); padding:5px; border-radius:14px;
+    width:fit-content; margin:2px auto 20px; box-shadow:var(--shadow); }
+  nav button { border:0; background:transparent; color:#cdd8ee; font-size:14px; font-weight:700;
+    padding:9px 18px; border-radius:10px; cursor:pointer; transition:.15s; }
+  nav button.active { background:#fff; color:var(--ink); }
+
+  /* cards grid */
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:16px; }
+  .game { background:var(--card); border-radius:16px; box-shadow:var(--shadow); overflow:hidden;
+    border:1px solid var(--line); display:flex; flex-direction:column; }
+  .game .stripe { height:6px; width:100%; }
+  .game .top { display:flex; align-items:center; gap:8px; padding:11px 14px 4px; }
+  .badge-live { background:var(--live); color:#fff; font-size:11px; font-weight:800; letter-spacing:.4px;
+    padding:3px 8px; border-radius:6px; display:flex; align-items:center; gap:5px; }
+  .badge-live .d { width:6px; height:6px; border-radius:50%; background:#fff; animation:pulse 1.5s infinite; }
+  .badge-final { background:#0e1526; color:#fff; font-size:11px; font-weight:800; letter-spacing:.4px; padding:3px 8px; border-radius:6px; }
+  .eyes { margin-left:auto; color:var(--muted); font-size:13px; font-weight:600; }
+
+  /* matchup rows */
+  .rows { padding:6px 14px 4px; }
+  .team { display:flex; align-items:center; gap:11px; padding:8px 0; }
+  .team + .team { border-top:1px solid var(--line); }
+  .logo { width:38px; height:38px; border-radius:9px; display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:800; color:#fff; flex:0 0 auto; letter-spacing:.2px; }
+  .tname { font-weight:700; font-size:15px; line-height:1.15; }
+  .tsub { color:var(--muted); font-size:12px; font-weight:500; }
+  .rank { color:var(--muted); font-size:12px; font-weight:800; margin-right:4px; vertical-align:1px; }
+  .rec { color:var(--muted); font-size:12px; font-weight:600; }
+  .score { margin-left:auto; font-size:30px; font-weight:800; letter-spacing:-1px; font-variant-numeric:tabular-nums; }
+  .team.lead .score { color:var(--ink); }
+  .team.trail { opacity:.62; }
+
+  /* status bar */
+  .status { display:flex; align-items:center; gap:8px; padding:10px 14px; margin-top:2px;
+    background:var(--chip); font-size:13px; font-weight:700; color:var(--ink); }
+  .status .q { color:var(--live); }
+  .status .clk { font-variant-numeric:tabular-nums; }
+  .status .src { margin-left:auto; font-size:11px; font-weight:600; color:var(--muted); }
+  .status .src.manual { color:var(--good); }
+  .status .src.stale { color:var(--warn); }
+
+  /* single-stream (no score) body */
+  .solo { padding:12px 14px 4px; }
+  .solo .coach { font-weight:800; font-size:17px; }
+  .solo .title { color:var(--muted); font-size:13px; margin-top:3px; line-height:1.35;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .solo .await { margin-top:9px; font-size:12px; color:var(--muted); font-weight:600; }
+
+  /* footer */
+  .foot { display:flex; align-items:center; gap:10px; padding:11px 14px; border-top:1px solid var(--line); margin-top:auto; }
+  .who { font-size:12.5px; color:var(--muted); font-weight:600; }
+  .btns { margin-left:auto; display:flex; gap:8px; }
+  .watch { background:#9146FF; color:#fff; border:0; text-decoration:none; font-size:12.5px; font-weight:700;
+    padding:8px 13px; border-radius:9px; display:inline-flex; align-items:center; gap:6px; }
+  .edit { background:#fff; border:1px solid var(--line); color:var(--muted); font-size:12.5px; font-weight:700;
+    padding:8px 11px; border-radius:9px; cursor:pointer; }
+  .edit:hover { color:var(--ink); }
+
+  /* off-dynasty card */
+  .game.off { opacity:.7; }
+  .game.off .stripe { background:#c3cad8 !important; }
+
+  /* empty / section titles */
+  .section-note { color:var(--muted); font-size:13.5px; font-weight:600; margin:0 2px 14px; }
+  .empty { background:#fff; border-radius:16px; box-shadow:var(--shadow); padding:46px 20px; text-align:center;
+    color:var(--muted); }
+  .empty .big { font-size:44px; }
+  .empty h3 { color:var(--ink); margin:10px 0 4px; }
+
+  /* standings table */
+  .panel { background:#fff; border-radius:16px; box-shadow:var(--shadow); overflow:hidden; }
   table { width:100%; border-collapse:collapse; }
-  th,td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); font-size:14px; }
-  th { color:var(--muted); font-weight:600; }
-  .bar { height:8px; background:var(--dim); border-radius:6px; overflow:hidden; min-width:80px; }
-  .bar > span { display:block; height:100%; background:var(--live); }
-  .no { color:var(--accent); } .yes { color:var(--live); }
-  .empty { color:var(--muted); padding:30px 0; text-align:center; }
-  .mu { display:flex; align-items:center; justify-content:space-between; }
-  .mu .side { flex:1; } .mu .side.r { text-align:right; }
-  .vs { color:var(--muted); padding:0 12px; font-size:12px; }
-  .badge { font-size:11px; padding:2px 8px; border-radius:20px; margin-left:8px; }
-  .badge.done { background:rgba(63,185,80,.15); color:var(--live); }
-  .badge.wait { background:rgba(139,148,158,.15); color:var(--muted); }
-  footer { color:var(--muted); font-size:12px; padding:0 20px 24px; }
+  th,td { padding:13px 14px; text-align:left; font-size:14px; }
+  thead th { background:#f7f9fc; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.5px; }
+  tbody tr { border-top:1px solid var(--line); }
+  .rankcell { display:flex; align-items:center; gap:11px; }
+  .played { color:var(--good); font-weight:700; }
+  .notyet { color:var(--muted); font-weight:600; }
+  .bar { height:8px; background:#eef1f7; border-radius:99px; overflow:hidden; width:110px; }
+  .bar > span { display:block; height:100%; border-radius:99px; }
+
+  /* schedule */
+  .mrow { background:#fff; border-radius:14px; box-shadow:var(--shadow); padding:14px 16px; margin-bottom:11px;
+    display:flex; align-items:center; gap:12px; }
+  .mside { display:flex; align-items:center; gap:10px; flex:1; }
+  .mside.r { justify-content:flex-end; }
+  .mvs { color:var(--muted); font-weight:800; font-size:12px; }
+  .pill { font-size:11px; font-weight:800; padding:5px 10px; border-radius:999px; }
+  .pill.done { background:#e7f7ee; color:var(--good); }
+  .pill.wait { background:#f1f4fa; color:var(--muted); }
+
+  .updated { text-align:center; color:#8a94aa; font-size:12px; margin-top:22px; }
+  @media (max-width:560px){ .brand h1{font-size:22px} .grid{grid-template-columns:1fr} }
 </style>
 </head>
 <body>
-<header>
-  <h1>🏈 Dynasty Ticker</h1>
-  <span class="pill" id="status">connecting…</span>
-</header>
-<nav>
-  <button data-tab="live" class="active">Live now</button>
-  <button data-tab="weekly">Weekly activity</button>
-  <button data-tab="schedule">Schedule</button>
-</nav>
-<main>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <span class="ball">🏈</span>
+      <div>
+        <h1>Dynasty Live</h1>
+        <div class="sub" id="sub">Loading…</div>
+      </div>
+      <span class="livecount" id="livecount"><span class="dot"></span> …</span>
+    </div>
+    <nav>
+      <button data-tab="live" class="active">Live</button>
+      <button data-tab="final">Final</button>
+    </nav>
+  </header>
+
   <section id="live"></section>
-  <section id="weekly" hidden></section>
-  <section id="schedule" hidden></section>
-</main>
-<footer>Auto-refreshes every 30s. Green = playing the dynasty right now.</footer>
+  <section id="final" hidden></section>
+
+  <div class="updated" id="updated"></div>
+</div>
 
 <script>
-const $ = s => document.querySelector(s);
-const tabs = ["live","weekly","schedule"];
-document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
-  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
-  tabs.forEach(t => $("#"+t).hidden = t !== b.dataset.tab);
-});
-
-const fmtAgo = iso => {
-  if (!iso) return "—";
-  const m = Math.round((Date.now() - new Date(iso)) / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return m + "m";
-  const h = Math.floor(m/60); return h + "h " + (m%60) + "m";
+// ---- team colors + abbreviations for the roster ----
+const TEAMS = {
+  "GA Southern":     { c:"#041E42", t:"#EAAA00", a:"GASO" },
+  "Rice":            { c:"#00205B", t:"#ffffff", a:"RICE" },
+  "Tulsa":           { c:"#002D72", t:"#C8102E", a:"TU" },
+  "FIU":             { c:"#081E3F", t:"#B6862C", a:"FIU" },
+  "Coastal Carolina":{ c:"#006F71", t:"#A27752", a:"CCU" },
+  "ECU":             { c:"#592A8A", t:"#FDC82F", a:"ECU" },
+  "FAU":             { c:"#003366", t:"#CC0000", a:"FAU" },
+  "App State":       { c:"#111111", t:"#FFCC00", a:"APP" },
+  "UTSA":            { c:"#0C2340", t:"#F15A22", a:"UTSA" },
+  "James Madison":   { c:"#450084", t:"#CBB677", a:"JMU" },
+  "Tulane":          { c:"#006747", t:"#418FDE", a:"TUL" },
+  "Liberty":         { c:"#990000", t:"#0A254E", a:"LIB" },
+  "Texas State":     { c:"#501214", t:"#8E7332", a:"TXST" },
+  "Sac State":       { c:"#043927", t:"#C4B581", a:"SAC" },
+  "Louisiana":       { c:"#CE181E", t:"#111111", a:"ULL" },
+  "Fresno State":    { c:"#DB0032", t:"#00285E", a:"FRES" },
+  "Utah State":      { c:"#00263A", t:"#A2AAAD", a:"USU" },
+  "Temple":          { c:"#9D2235", t:"#ffffff", a:"TEM" },
+  "Washington State":{ c:"#981E32", t:"#5E6A71", a:"WSU" },
+  "Ball State":      { c:"#BA0C2F", t:"#ffffff", a:"BALL" },
+  "Wyoming":         { c:"#492F24", t:"#FFC425", a:"WYO" },
 };
-const esc = s => (s||"").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const DEFT = { c:"#334155", t:"#ffffff", a:"—" };
+const teamOf = name => TEAMS[name] || DEFT;
+const abbrOf = name => (TEAMS[name]?.a) || (name ? name.slice(0,4).toUpperCase() : "—");
 
-async function renderLive() {
+const $ = s => document.querySelector(s);
+const esc = s => (s||"").replace(/[&<>"]/g,c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const tabs = ["live","final"];
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x===b));
+  tabs.forEach(t=>$("#"+t).hidden = t!==b.dataset.tab);
+});
+const fmtAgo = iso => {
+  if(!iso) return "—";
+  const m=Math.round((Date.now()-new Date(iso))/60000);
+  if(m<1) return "just now"; if(m<60) return m+"m ago";
+  const h=Math.floor(m/60); return h+"h "+(m%60)+"m ago";
+};
+const liveLen = iso => { if(!iso) return ""; const m=Math.round((Date.now()-new Date(iso))/60000);
+  return m<60? m+"m": Math.floor(m/60)+"h "+(m%60)+"m"; };
+
+// ---------- LIVE ----------
+async function renderLive(){
   const d = await (await fetch("/api/live")).json();
-  $("#status").innerHTML = d.streams.length
-    ? `<span class="live-dot"></span>${d.streams.length} live · updated ${fmtAgo(d.updatedAt)} ago`
-    : `no one live · updated ${fmtAgo(d.updatedAt)} ago`;
-  const on = d.streams.filter(s => s.onDynasty).length;
-  if (!d.streams.length) { $("#live").innerHTML = `<div class="empty">Nobody's streaming right now. Check back later.</div>`; return; }
-  const sorted = [...d.streams].sort((a,b) => (b.onDynasty - a.onDynasty) || (b.viewers - a.viewers));
-  $("#live").innerHTML = `<p class="pill" style="margin:4px 0 14px">${on} playing the dynasty, ${d.streams.length - on} streaming something else</p><div class="grid">` +
-    sorted.map(s => `
-      <div class="card ${s.onDynasty ? "on" : ""}">
-        <h3><a href="${s.url}" target="_blank">${esc(s.coach)}</a></h3>
-        <div class="team">${esc(s.team)} · @${esc(s.twitch)}</div>
-        <span class="tag ${s.onDynasty ? "dyn" : "off"}">${s.onDynasty ? "● On dynasty" : "○ " + esc(s.game || "Other")}</span>
-        <p class="title">${esc(s.title)}</p>
-        <div class="meta"><span>👁 ${s.viewers}</span><span>⏱ live ${fmtAgo(s.startedAt)}</span></div>
-      </div>`).join("") + `</div>`;
+  const streams = d.streams||[];
+  const onD = streams.filter(s=>s.onDynasty);
+  $("#sub").textContent = "Live scores and final results";
+  $("#livecount").innerHTML = streams.length
+    ? `<span class="dot"></span> ${onD.length} live`
+    : `<span class="dot" style="background:#7a869f"></span> none live`;
+  $("#updated").textContent = "Updated "+fmtAgo(d.updatedAt);
+
+  if(!streams.length){
+    $("#live").innerHTML = `<div class="empty"><div class="big">😴</div>
+      <h3>Nobody's live right now</h3><div>When a coach fires up a stream, their game shows up here.</div></div>`;
+    return;
+  }
+  const sorted=[...streams].sort((a,b)=>(b.onDynasty-a.onDynasty)||((b.score?1:0)-(a.score?1:0))||(b.viewers-a.viewers));
+  $("#live").innerHTML =
+    `<p class="section-note">${onD.length} playing the dynasty${streams.length-onD.length? ` · ${streams.length-onD.length} streaming something else`:""}</p>`
+    + `<div class="grid">${sorted.map(card).join("")}</div>`;
 }
 
-async function renderWeekly() {
-  const d = await (await fetch("/api/weekly")).json();
-  const max = Math.max(60, ...d.activity.map(a => a.minutes));
-  const rows = d.activity.map(a => `
-    <tr>
-      <td>${esc(a.coach)}<div class="team">${esc(a.team)}</div></td>
-      <td class="${a.played ? "yes" : "no"}">${a.played ? "Played" : "Not yet"}</td>
-      <td>${a.sessions}</td>
-      <td><div class="bar"><span style="width:${Math.round(a.minutes/max*100)}%"></span></div>${a.minutes}m</td>
-      <td>${fmtAgo(a.lastSeen)}</td>
-    </tr>`).join("");
-  const behind = d.activity.filter(a => !a.played).map(a => a.coach);
-  $("#weekly").innerHTML = `
-    <p class="pill" style="margin:4px 0 14px">Week ${d.week}${d.seasonYear ? " · "+d.seasonYear : ""} — ${d.activity.filter(a=>a.played).length}/${d.activity.length} have played${behind.length ? " · behind: " + behind.map(esc).join(", ") : ""}</p>
-    <table><thead><tr><th>Coach</th><th>Status</th><th>Sessions</th><th>Time on dynasty</th><th>Last seen</th></tr></thead><tbody>${rows}</tbody></table>`;
+function card(s){
+  const my = teamOf(s.team);
+  if(!s.onDynasty){
+    return `<div class="game off">
+      <div class="stripe"></div>
+      <div class="top"><span class="badge-live" style="background:#8a94aa"><span class="d"></span>LIVE</span><span class="eyes">👁 ${s.viewers}</span></div>
+      <div class="solo"><div class="coach">${esc(s.coach)}</div>
+        <div class="title">Streaming ${esc(s.game||"something else")} — not the dynasty</div></div>
+      <div class="foot"><span class="who">@${esc(s.twitch)}</span>
+        <div class="btns"><a class="watch" href="${s.url}" target="_blank">Watch ▶</a></div></div>
+    </div>`;
+  }
+  const sc = s.score;
+  if(sc && (sc.awayScore!=null || sc.homeScore!=null)){
+    // matchup scoreboard
+    const A = { name: sc.away||abbrOf(s.team), col: teamOf(nameFromAbbr(sc.away)||s.team) };
+    // the streaming coach's team = my; opponent = the other side
+    const homeT = teamOf(nameFromAbbr(sc.home)||"");
+    const awayT = teamOf(nameFromAbbr(sc.away)||"");
+    const aLead = (sc.awayScore??0) > (sc.homeScore??0);
+    const hLead = (sc.homeScore??0) > (sc.awayScore??0);
+    const srcCls = sc.stale?"src stale":(sc.source==="manual"?"src manual":"src");
+    const srcTxt = sc.stale?"reading stale":(sc.source==="manual"?"entered":"auto");
+    const stat = [sc.quarter?`<span class="q">${esc(sc.quarter)}</span>`:"", sc.clock?`<span class="clk">${esc(sc.clock)}</span>`:""].filter(Boolean).join(" · ") || "LIVE";
+    return `<div class="game">
+      <div class="stripe" style="background:linear-gradient(90deg,${awayT.c} 50%, ${homeT.c} 50%)"></div>
+      <div class="top"><span class="badge-live"><span class="d"></span>LIVE</span><span class="eyes">👁 ${s.viewers}</span></div>
+      <div class="rows">
+        ${teamRow(sc.away, awayT, sc.awayScore, aLead)}
+        ${teamRow(sc.home, homeT, sc.homeScore, hLead)}
+      </div>
+      <div class="status">${stat}<span class="${srcCls}">${srcTxt}</span></div>
+      <div class="foot"><span class="who">${esc(s.coach)} streaming · ${liveLen(s.startedAt)}</span>
+        <div class="btns">
+          <button class="edit" onclick="editScore('${esc(s.twitch)}','${esc(s.coach)}')">✎</button>
+          <a class="watch" href="${s.url}" target="_blank">Watch ▶</a>
+        </div></div>
+    </div>`;
+  }
+  // on dynasty but no score yet
+  return `<div class="game">
+    <div class="stripe" style="background:${my.c}"></div>
+    <div class="top"><span class="badge-live"><span class="d"></span>LIVE</span><span class="eyes">👁 ${s.viewers}</span></div>
+    <div class="rows"><div class="team">
+      <div class="logo" style="background:${my.c};color:${my.t}">${esc(abbrOf(s.team))}</div>
+      <div><div class="tname">${(()=>{const r=recFor(s.team);return r&&r.rank?`<span class="rank">#${r.rank}</span>`:"";})()}${esc(s.coach)}</div>
+        <div class="tsub">${esc([s.team||"", (recFor(s.team)||{}).record].filter(Boolean).join(" · "))}</div></div>
+    </div></div>
+    <div class="solo"><div class="title">${esc(s.title)}</div>
+      <div class="await">⏳ Score appears once the scoreboard is on screen</div></div>
+    <div class="foot"><span class="who">@${esc(s.twitch)} · ${liveLen(s.startedAt)}</span>
+      <div class="btns">
+        <button class="edit" onclick="editScore('${esc(s.twitch)}','${esc(s.coach)}')">✎ score</button>
+        <a class="watch" href="${s.url}" target="_blank">Watch ▶</a>
+      </div></div>
+  </div>`;
 }
 
-async function renderSchedule() {
-  const w = await (await fetch("/api/weekly")).json();
-  if (!w.matchups.length) { $("#schedule").innerHTML = `<div class="empty">No matchups set. Edit schedule.json.</div>`; return; }
-  $("#schedule").innerHTML = `<p class="pill" style="margin:4px 0 14px">Week ${w.week} slate — progress inferred from who has streamed</p>` +
-    w.matchups.map(m => `
-      <div class="card mu" style="margin-bottom:10px">
-        <span class="side ${m.homePlayed ? "yes":""}">${esc(m.home)}</span>
-        <span class="vs">vs</span>
-        <span class="side r ${m.awayPlayed ? "yes":""}">${esc(m.away)}</span>
-        <span class="badge ${m.likelyPlayed ? "done":"wait"}">${m.likelyPlayed ? "✓ likely played" : "waiting"}</span>
-      </div>`).join("");
+function teamRow(abbr, tcol, score, lead){
+  const r = recFor(abbr);
+  const rank = r&&r.rank ? `<span class="rank">#${r.rank}</span>` : "";
+  const rec  = r&&r.record ? `<div class="tsub"><span class="rec">${esc(r.record)}</span></div>` : "";
+  return `<div class="team ${lead?'lead':(score!=null?'trail':'')}">
+    <div class="logo" style="background:${tcol.c};color:${tcol.t}">${esc(abbr||tcol.a)}</div>
+    <div><div class="tname">${rank}${esc(fullFromAbbr(abbr)||abbr||"Team")}</div>${rec}</div>
+    <div class="score">${score==null?"–":score}</div>
+  </div>`;
+}
+// map an OCR abbreviation back to a roster team name / colors when possible
+function nameFromAbbr(ab){ if(!ab) return null; ab=ab.toUpperCase();
+  for(const [name,v] of Object.entries(TEAMS)) if(v.a===ab) return name; return null; }
+function fullFromAbbr(ab){ return nameFromAbbr(ab); }
+
+// ---------- FINAL (completed games) ----------
+let COACH_TEAM = {};
+let STANDINGS = {};
+async function loadMembers(){
+  try{ const d=await (await fetch("/api/members")).json();
+    (d.members||[]).forEach(m=>COACH_TEAM[m.coach]=m.team); }catch{}
+  try{ const s=await (await fetch("/api/standings")).json(); STANDINGS = s.teams||{}; }catch{}
+}
+const teamForCoach = (coach,team) => teamOf(team || COACH_TEAM[coach] || "");
+
+// rank + record lookup by team name OR OCR abbreviation
+function recFor(x){
+  if(!x) return null;
+  const name = nameFromAbbr(x) || x;
+  if(STANDINGS[name]) return STANDINGS[name];
+  const key = Object.keys(STANDINGS).find(k => k.toLowerCase() === String(name).toLowerCase());
+  return key ? STANDINGS[key] : null;
 }
 
-async function refresh() {
-  try { await Promise.all([renderLive(), renderWeekly(), renderSchedule()]); }
-  catch (e) { $("#status").textContent = "error: " + e.message; }
+async function renderFinal(){
+  const d = await (await fetch("/api/finals")).json();
+  const finals = d.finals||[];
+  if(!finals.length){
+    $("#final").innerHTML = `<div class="empty"><div class="big">🏁</div>
+      <h3>No finals yet</h3><div>When a game wraps, its final score lands here automatically.</div></div>`;
+    return;
+  }
+  $("#final").innerHTML = `<p class="section-note">${finals.length} game${finals.length>1?'s':''} final</p>`
+    + `<div class="grid">${finals.map(finalCard).join("")}</div>`;
 }
-refresh();
-setInterval(refresh, 30000);
+
+function finalCard(g){
+  const aT = teamOf(nameFromAbbr(g.away)||"");
+  const hT = teamOf(nameFromAbbr(g.home)||"");
+  const aLead=(g.awayScore??0)>(g.homeScore??0), hLead=(g.homeScore??0)>(g.awayScore??0);
+  return `<div class="game">
+    <div class="stripe" style="background:linear-gradient(90deg,${aT.c} 50%, ${hT.c} 50%)"></div>
+    <div class="top"><span class="badge-final">FINAL</span><span class="eyes">${fmtAgo(g.endedAt)}</span></div>
+    <div class="rows">
+      ${teamRow(g.away, aT, g.awayScore, aLead)}
+      ${teamRow(g.home, hT, g.homeScore, hLead)}
+    </div>
+    <div class="foot"><span class="who">${esc(g.coach)}${g.team?` · ${esc(g.team)}`:""}</span>
+      <div class="btns"><button class="edit" onclick="editFinal('${esc(g.id)}','${esc(g.coach)}')">✎ edit</button></div>
+    </div>
+  </div>`;
+}
+
+async function editFinal(id, coach){
+  const cur = prompt(`Final score for ${coach}.\nFormat: awayAbbr awayScore homeAbbr homeScore\nExample: GASO 21 APP 17\n(leave blank to remove this game)`, "");
+  if(cur===null) return;
+  if(cur.trim()===""){ await fetch("/api/final/"+encodeURIComponent(id),{method:"DELETE"}); return refresh(); }
+  const p=cur.trim().split(/\s+/);
+  await fetch("/api/final/"+encodeURIComponent(id),{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({away:p[0],awayScore:p[1],home:p[2],homeScore:p[3]})});
+  refresh();
+}
+
+// ---------- manual score ----------
+async function editScore(twitch, coach){
+  const cur = prompt(`Enter the score for ${coach}.\nFormat: awayAbbr awayScore homeAbbr homeScore quarter clock\nExample: JMU 0 DEL 7 1ST 3:18\n(leave blank to clear)`, "");
+  if(cur===null) return;
+  if(cur.trim()===""){ await fetch("/api/score/"+encodeURIComponent(twitch),{method:"DELETE"}); return refresh(); }
+  const p=cur.trim().split(/\s+/);
+  await fetch("/api/score/"+encodeURIComponent(twitch),{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({away:p[0],awayScore:p[1],home:p[2],homeScore:p[3],quarter:p[4],clock:p[5],coach})});
+  refresh();
+}
+
+async function refresh(){
+  try{ await Promise.all([renderLive(), renderFinal()]); }
+  catch(e){ $("#sub").textContent="Connection issue — retrying…"; }
+}
+loadMembers().then(refresh);
+setInterval(refresh, 20000);
 </script>
 </body>
 </html>
