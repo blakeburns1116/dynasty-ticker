@@ -105,7 +105,11 @@ async function poll() {
 
     const streams = raw.map(s => {
       const m = byLogin.get((s.user_login || "").toLowerCase()) || {};
-      const onDynasty = !GAME_NAME || (s.game_name || "").toLowerCase() === GAME_NAME.toLowerCase();
+      // lenient game match: exact, substring, or any "college football" title so
+      // a slightly different Twitch category name still counts.
+      const cat = (s.game_name || "").toLowerCase();
+      const g = (GAME_NAME || "").toLowerCase();
+      const onDynasty = !GAME_NAME || cat === g || cat.includes(g) || cat.includes("college football");
       return {
         twitch: s.user_login,
         displayName: s.user_name,
@@ -206,15 +210,37 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// Live board. Only streams CONFIRMED to be this dynasty are shown — i.e. a
-// scoreboard read (or manual entry) matched the coach's assigned team. This keeps
-// out other dynasties the same coaches stream in the same game.
+// Live board.
+// Default (loose): show a roster coach's College Football stream, and hide it
+// ONLY when the scoreboard clearly shows a different team (another dynasty).
+// STRICT_DYNASTY=1 flips to confirm-to-show (only streams whose scoreboard
+// matched the coach's team appear) — use once OCR is reliable across streams.
+const STRICT = process.env.STRICT_DYNASTY === "1";
 app.get("/api/live", (_req, res) => {
   const decorated = scorewatch.decorate(liveSnapshot.streams);
-  const confirmed = decorated
-    .filter(s => s.score && s.score.dynastyConfirmed)
-    .map(s => ({ ...s, onDynasty: true }));
-  res.json({ updatedAt: liveSnapshot.updatedAt, streams: confirmed });
+  const shown = decorated.filter(s => {
+    if (!s.onDynasty) return false;               // not a College Football stream
+    const sc = s.score;
+    if (STRICT) return !!(sc && sc.dynastyConfirmed);
+    // loose: only drop streams the scoreboard positively identifies as another team
+    if (sc && sc.away && sc.home && !sc.dynastyConfirmed) return false;
+    return true;
+  });
+  res.json({ updatedAt: liveSnapshot.updatedAt, streams: shown });
+});
+
+// Debug: raw view of every roster stream Twitch reports, with category + score.
+app.get("/api/debug", (_req, res) => {
+  res.json({
+    updatedAt: liveSnapshot.updatedAt,
+    gameName: GAME_NAME,
+    strict: STRICT,
+    streams: scorewatch.decorate(liveSnapshot.streams).map(s => ({
+      coach: s.coach, team: s.team, twitch: s.twitch,
+      game: s.game, onDynasty: s.onDynasty,
+      score: s.score ? { away: s.score.away, home: s.score.home, confirmed: s.score.dynastyConfirmed, source: s.score.source } : null,
+    })),
+  });
 });
 app.get("/api/weekly", (_req, res) => res.json(weeklyRollup()));
 app.get("/api/schedule", (_req, res) => res.json(getSchedule()));
