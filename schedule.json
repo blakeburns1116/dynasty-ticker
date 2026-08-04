@@ -1,0 +1,10 @@
+{
+  "_comment": "The current in-game week's slate. Set 'week' and list matchups. 'home'/'away' are coach names from members.json. When both coaches have streamed since the week's games were released, the ticker marks the game as likely played. User vs CPU games: set away to \"CPU\".",
+  "week": 6,
+  "seasonYear": 2027,
+  "matchups": [
+    { "home": "Blake",  "away": "Marcus" },
+    { "home": "Devin",  "away": "CPU" },
+    { "home": "Sarah",  "away": "CPU" }
+  ]
+}

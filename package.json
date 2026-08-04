@@ -1,0 +1,17 @@
+{
+  "name": "dynasty-ticker",
+  "version": "1.0.0",
+  "description": "Live Twitch ticker + weekly activity tracker for an NCAA 27 dynasty",
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "mock": "MOCK=1 node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

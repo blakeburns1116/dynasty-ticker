@@ -1,0 +1,26 @@
+{
+  "_comment": "One entry per dynasty member. twitch = their exact Twitch login (the name in twitch.tv/NAME, lowercase). coach = the person. team = the school they coach.",
+  "members": [
+    { "twitch": "iam_jaja",        "coach": "Sherif",       "team": "GA Southern" },
+    { "twitch": "daboyboytwone",   "coach": "Twone",        "team": "Rice" },
+    { "twitch": "ohio_ap",         "coach": "AP",           "team": "Tulsa" },
+    { "twitch": "bcburns1616",     "coach": "B Shiesty",    "team": "FIU" },
+    { "twitch": "competegaming777","coach": "James",        "team": "Coastal Carolina" },
+    { "twitch": "shorterinperson", "coach": "Ralph",        "team": "ECU" },
+    { "twitch": "karakter4",       "coach": "AK",           "team": "FAU" },
+    { "twitch": "justrent5",       "coach": "Trent",        "team": "App State" },
+    { "twitch": "draywashington",  "coach": "Dray",         "team": "UTSA" },
+    { "twitch": "xroncx",          "coach": "Ron",          "team": "James Madison" },
+    { "twitch": "d_carter1",       "coach": "DC",           "team": "Tulane" },
+    { "twitch": "elitenrgy",       "coach": "Trump",        "team": "Liberty" },
+    { "twitch": "genes1s_1906",    "coach": "Rashann",      "team": "Texas State" },
+    { "twitch": "khoureyc",        "coach": "Special K",    "team": "Sac State" },
+    { "twitch": "jabolden2",       "coach": "Jeff",         "team": "Louisiana" },
+    { "twitch": "mwhippertv",      "coach": "Marcus",       "team": "Fresno State" },
+    { "twitch": "alexlee1518",     "coach": "A Lee",        "team": "Utah State" },
+    { "twitch": "vigilaante_",     "coach": "Vegas Dwayne", "team": "Temple" },
+    { "twitch": "jlee1216",        "coach": "J Lee",        "team": "Washington State" },
+    { "twitch": "thesummersmine",  "coach": "TSM13",        "team": "Ball State" },
+    { "twitch": "bjpetty138",      "coach": "BJ",           "team": "Wyoming" }
+  ]
+}
