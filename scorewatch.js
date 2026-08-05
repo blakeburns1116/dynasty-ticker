@@ -25,6 +25,9 @@ const INTERVAL = Number(process.env.SCORE_SECONDS || 25) * 1000;
 const CONCURRENCY = Number(process.env.SCORE_CONCURRENCY || 3);
 const MIN_CONF = Number(process.env.SCORE_MIN_CONFIDENCE || 0.22);
 const FRAME_TTL = Number(process.env.SCORE_STALE_SECONDS || 120) * 1000;
+// grab up to N frames per read so a replay/menu/blurry moment doesn't lose the score
+const GRAB_ATTEMPTS = Number(process.env.SCORE_GRAB_ATTEMPTS || 3);
+const GRAB_GAP_MS = Number(process.env.SCORE_GRAB_GAP_MS || 1200);
 
 // login -> { away, home, awayScore, homeScore, quarter, clock, confidence, source, updatedAt, coach, team, startedAt }
 let scores = {};
@@ -127,18 +130,47 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// Read one stream: grab a frame, OCR it. `frameOverride` lets tests skip grab.sh.
-async function readOne(login, frameOverride) {
-  const frame = frameOverride || path.join(os.tmpdir(), `frame_${login}.jpg`);
-  if (!frameOverride) {
-    await execFileP("bash", [path.join(SCORE_DIR, "grab.sh"), login, frame], { timeout: 30000 });
-  }
+// OCR a single frame file.
+async function readFrame(frame) {
   const { stdout } = await execFileP(
     "python3",
     [path.join(SCORE_DIR, "read_score.py"), frame, "--template", path.join(SCORE_DIR, "template.json")],
     { timeout: 30000 }
   );
   return JSON.parse(stdout.trim());
+}
+
+// Score a read's completeness so we can keep the best of several frames.
+function readQuality(r) {
+  if (!r || !r.ok) return -1;
+  let q = r.confidence || 0;
+  if (r.awayScore != null) q += 0.6;
+  if (r.homeScore != null) q += 0.6;
+  if (r.away) q += 0.3;
+  if (r.home) q += 0.3;
+  return q;
+}
+const goodEnough = r =>
+  r && r.ok && r.awayScore != null && r.homeScore != null && (r.confidence || 0) >= MIN_CONF;
+
+// Read one stream: grab up to GRAB_ATTEMPTS frames and keep the best read, so a
+// replay/menu/blurry moment on the first grab doesn't lose the score.
+// `frameOverride` lets tests skip grab.sh and read a fixed frame once.
+async function readOne(login, frameOverride) {
+  if (frameOverride) return readFrame(frameOverride);
+  const frame = path.join(os.tmpdir(), `frame_${login}.jpg`);
+  let best = { ok: false }, bestQ = -1;
+  for (let i = 0; i < GRAB_ATTEMPTS; i++) {
+    try {
+      await execFileP("bash", [path.join(SCORE_DIR, "grab.sh"), login, frame], { timeout: 30000 });
+      const r = await readFrame(frame);
+      const q = readQuality(r);
+      if (q > bestQ) { best = r; bestQ = q; }
+      if (goodEnough(r)) break;                 // stop early on a clean full read
+    } catch (e) { /* try the next frame */ }
+    if (i < GRAB_ATTEMPTS - 1) await new Promise(res => setTimeout(res, GRAB_GAP_MS));
+  }
+  return best;
 }
 
 // Update scores for all currently-live on-dynasty streams.
