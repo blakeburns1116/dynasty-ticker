@@ -120,7 +120,8 @@
 
   /* footer */
   .foot { display:flex; align-items:center; gap:10px; padding:11px 14px; border-top:1px solid var(--line); margin-top:auto; }
-  .who { font-size:12.5px; color:var(--muted); font-weight:600; }
+  .who { font-size:12.5px; color:var(--ink); font-weight:700; }
+  .who-sub { display:block; font-size:11.5px; color:var(--muted); font-weight:600; margin-top:1px; }
   .btns { margin-left:auto; display:flex; gap:8px; }
   .watch { background:#9146FF; color:#fff; border:0; text-decoration:none; font-size:12.5px; font-weight:700;
     padding:8px 13px; border-radius:9px; display:inline-flex; align-items:center; gap:6px; }
@@ -225,6 +226,130 @@ const DEFT = { c:"#334155", t:"#ffffff", a:"—" };
 const teamOf = name => TEAMS[name] || DEFT;
 const abbrOf = name => (TEAMS[name]?.a) || (name ? name.slice(0,4).toUpperCase() : "—");
 
+// Non-roster FBS opponents: {n:display name, c:primary bg, t:secondary/contrast text, a:abbr}.
+// Keyed by normalized (lowercase, alphanumeric) school name the score bug shows.
+const OPP = {
+  // SEC
+  "alabama":{n:"Alabama",c:"#9E1B32",t:"#ffffff",a:"ALA"},
+  "arkansas":{n:"Arkansas",c:"#9D2235",t:"#ffffff",a:"ARK"},
+  "auburn":{n:"Auburn",c:"#0C2340",t:"#E87722",a:"AUB"},
+  "florida":{n:"Florida",c:"#0021A5",t:"#FA4616",a:"FLA"},
+  "georgia":{n:"Georgia",c:"#BA0C2F",t:"#000000",a:"UGA"},
+  "kentucky":{n:"Kentucky",c:"#0033A0",t:"#ffffff",a:"UK"},
+  "lsu":{n:"LSU",c:"#461D7C",t:"#FDD023",a:"LSU"},
+  "mississippistate":{n:"Mississippi State",c:"#660000",t:"#ffffff",a:"MSST"},
+  "missouri":{n:"Missouri",c:"#000000",t:"#F1B82D",a:"MIZ"},
+  "oklahoma":{n:"Oklahoma",c:"#841617",t:"#FDF9D8",a:"OU"},
+  "olemiss":{n:"Ole Miss",c:"#14213D",t:"#CE1126",a:"MISS"},
+  "southcarolina":{n:"South Carolina",c:"#73000A",t:"#000000",a:"SCAR"},
+  "tennessee":{n:"Tennessee",c:"#FF8200",t:"#ffffff",a:"TENN"},
+  "texas":{n:"Texas",c:"#BF5700",t:"#ffffff",a:"TEX"},
+  "texasam":{n:"Texas A&M",c:"#500000",t:"#ffffff",a:"TAMU"},
+  "vanderbilt":{n:"Vanderbilt",c:"#000000",t:"#866D4B",a:"VAN"},
+  // Big Ten
+  "illinois":{n:"Illinois",c:"#13294B",t:"#E84A27",a:"ILL"},
+  "indiana":{n:"Indiana",c:"#990000",t:"#ffffff",a:"IND"},
+  "iowa":{n:"Iowa",c:"#000000",t:"#FFCD00",a:"IOWA"},
+  "maryland":{n:"Maryland",c:"#E03A3E",t:"#FFD520",a:"MD"},
+  "michigan":{n:"Michigan",c:"#00274C",t:"#FFCB05",a:"MICH"},
+  "michiganstate":{n:"Michigan State",c:"#18453B",t:"#ffffff",a:"MSU"},
+  "minnesota":{n:"Minnesota",c:"#7A0019",t:"#FFCC33",a:"MINN"},
+  "nebraska":{n:"Nebraska",c:"#E41C38",t:"#ffffff",a:"NEB"},
+  "northwestern":{n:"Northwestern",c:"#4E2A84",t:"#ffffff",a:"NW"},
+  "ohiostate":{n:"Ohio State",c:"#BB0000",t:"#ffffff",a:"OSU"},
+  "oregon":{n:"Oregon",c:"#154733",t:"#FEE123",a:"ORE"},
+  "pennstate":{n:"Penn State",c:"#041E42",t:"#ffffff",a:"PSU"},
+  "purdue":{n:"Purdue",c:"#CEB888",t:"#000000",a:"PUR"},
+  "rutgers":{n:"Rutgers",c:"#CC0033",t:"#ffffff",a:"RUT"},
+  "ucla":{n:"UCLA",c:"#2D68C4",t:"#F2A900",a:"UCLA"},
+  "usc":{n:"USC",c:"#990000",t:"#FFC72C",a:"USC"},
+  "washington":{n:"Washington",c:"#4B2E83",t:"#B7A57A",a:"WASH"},
+  "wisconsin":{n:"Wisconsin",c:"#C5050C",t:"#ffffff",a:"WIS"},
+  // Big 12
+  "arizona":{n:"Arizona",c:"#003366",t:"#CC0033",a:"ARIZ"},
+  "arizonastate":{n:"Arizona State",c:"#8C1D40",t:"#FFC627",a:"ASU"},
+  "baylor":{n:"Baylor",c:"#154734",t:"#FFB81C",a:"BAY"},
+  "byu":{n:"BYU",c:"#002E5D",t:"#ffffff",a:"BYU"},
+  "cincinnati":{n:"Cincinnati",c:"#E00122",t:"#000000",a:"CIN"},
+  "colorado":{n:"Colorado",c:"#CFB87C",t:"#000000",a:"COLO"},
+  "houston":{n:"Houston",c:"#C8102E",t:"#ffffff",a:"HOU"},
+  "iowastate":{n:"Iowa State",c:"#C8102E",t:"#F1BE48",a:"ISU"},
+  "kansas":{n:"Kansas",c:"#0051BA",t:"#E8000D",a:"KU"},
+  "kansasstate":{n:"Kansas State",c:"#512888",t:"#ffffff",a:"KSU"},
+  "oklahomastate":{n:"Oklahoma State",c:"#FF7300",t:"#000000",a:"OKST"},
+  "tcu":{n:"TCU",c:"#4D1979",t:"#ffffff",a:"TCU"},
+  "texastech":{n:"Texas Tech",c:"#CC0000",t:"#000000",a:"TTU"},
+  "ucf":{n:"UCF",c:"#000000",t:"#BA9B37",a:"UCF"},
+  "utah":{n:"Utah",c:"#CC0000",t:"#ffffff",a:"UTAH"},
+  "westvirginia":{n:"West Virginia",c:"#002855",t:"#EAAA00",a:"WVU"},
+  // ACC
+  "bostoncollege":{n:"Boston College",c:"#8C2232",t:"#B29D6C",a:"BC"},
+  "california":{n:"California",c:"#003262",t:"#FDB515",a:"CAL"},
+  "clemson":{n:"Clemson",c:"#F56600",t:"#522D80",a:"CLEM"},
+  "duke":{n:"Duke",c:"#003087",t:"#ffffff",a:"DUKE"},
+  "floridastate":{n:"Florida State",c:"#782F40",t:"#CEB888",a:"FSU"},
+  "georgiatech":{n:"Georgia Tech",c:"#B3A369",t:"#003057",a:"GT"},
+  "louisville":{n:"Louisville",c:"#AD0000",t:"#000000",a:"LOU"},
+  "miami":{n:"Miami",c:"#F47321",t:"#005030",a:"MIA"},
+  "ncstate":{n:"NC State",c:"#CC0000",t:"#ffffff",a:"NCST"},
+  "northcarolina":{n:"North Carolina",c:"#7BAFD4",t:"#13294B",a:"UNC"},
+  "pittsburgh":{n:"Pittsburgh",c:"#003594",t:"#FFB81C",a:"PITT"},
+  "smu":{n:"SMU",c:"#002F6C",t:"#C8102E",a:"SMU"},
+  "stanford":{n:"Stanford",c:"#8C1515",t:"#ffffff",a:"STAN"},
+  "syracuse":{n:"Syracuse",c:"#F76900",t:"#000E54",a:"SYR"},
+  "virginia":{n:"Virginia",c:"#232D4B",t:"#F84C1E",a:"UVA"},
+  "virginiatech":{n:"Virginia Tech",c:"#630031",t:"#CF4420",a:"VT"},
+  "wakeforest":{n:"Wake Forest",c:"#9E7E38",t:"#000000",a:"WAKE"},
+  // Independents / academies
+  "notredame":{n:"Notre Dame",c:"#0C2340",t:"#C99700",a:"ND"},
+  "uconn":{n:"UConn",c:"#000E2F",t:"#ffffff",a:"CONN"},
+  "umass":{n:"UMass",c:"#881C1C",t:"#ffffff",a:"MASS"},
+  "army":{n:"Army",c:"#000000",t:"#D4BF91",a:"ARMY"},
+  "navy":{n:"Navy",c:"#00205B",t:"#C5B783",a:"NAVY"},
+  "airforce":{n:"Air Force",c:"#004A7B",t:"#ffffff",a:"AF"},
+  // Group of 5 (not already on the roster)
+  "boisestate":{n:"Boise State",c:"#0033A0",t:"#D64309",a:"BSU"},
+  "memphis":{n:"Memphis",c:"#003087",t:"#898D8D",a:"MEM"},
+  "southflorida":{n:"South Florida",c:"#006747",t:"#CFC493",a:"USF"},
+  "northtexas":{n:"North Texas",c:"#00853E",t:"#ffffff",a:"UNT"},
+  "utep":{n:"UTEP",c:"#FF8200",t:"#041E42",a:"UTEP"},
+  "uab":{n:"UAB",c:"#1E6B52",t:"#F4C300",a:"UAB"},
+  "charlotte":{n:"Charlotte",c:"#046A38",t:"#ffffff",a:"CLT"},
+  "marshall":{n:"Marshall",c:"#00B140",t:"#ffffff",a:"MRSH"},
+  "olddominion":{n:"Old Dominion",c:"#003057",t:"#7C878E",a:"ODU"},
+  "westernkentucky":{n:"Western Kentucky",c:"#C60C30",t:"#000000",a:"WKU"},
+  "middletennessee":{n:"Middle Tennessee",c:"#0066CC",t:"#ffffff",a:"MTSU"},
+  "newmexicostate":{n:"New Mexico State",c:"#8C0B42",t:"#ffffff",a:"NMSU"},
+  "samhouston":{n:"Sam Houston",c:"#F56600",t:"#ffffff",a:"SHSU"},
+  "kennesawstate":{n:"Kennesaw State",c:"#FDBB30",t:"#231F20",a:"KENN"},
+  "georgiastate":{n:"Georgia State",c:"#0039A6",t:"#C60C30",a:"GAST"},
+  "southalabama":{n:"South Alabama",c:"#00205B",t:"#BF0D3E",a:"USA"},
+  "troy":{n:"Troy",c:"#8A2432",t:"#C0C0C0",a:"TROY"},
+  "arkansasstate":{n:"Arkansas State",c:"#CC092F",t:"#000000",a:"ARST"},
+  "ulmonroe":{n:"UL Monroe",c:"#862633",t:"#FBB03B",a:"ULM"},
+  "akron":{n:"Akron",c:"#041E42",t:"#A89968",a:"AKR"},
+  "bowlinggreen":{n:"Bowling Green",c:"#FE5000",t:"#4F2C1D",a:"BGSU"},
+  "buffalo":{n:"Buffalo",c:"#005BBB",t:"#ffffff",a:"BUFF"},
+  "centralmichigan":{n:"Central Michigan",c:"#6A0032",t:"#FFC82E",a:"CMU"},
+  "easternmichigan":{n:"Eastern Michigan",c:"#00694E",t:"#ffffff",a:"EMU"},
+  "kentstate":{n:"Kent State",c:"#002664",t:"#EFAB00",a:"KENT"},
+  "northernillinois":{n:"Northern Illinois",c:"#C8102E",t:"#000000",a:"NIU"},
+  "ohio":{n:"Ohio",c:"#00694E",t:"#ffffff",a:"OHIO"},
+  "westernmichigan":{n:"Western Michigan",c:"#6C4023",t:"#B5A167",a:"WMU"},
+  "nevada":{n:"Nevada",c:"#003366",t:"#807F84",a:"NEV"},
+  "unlv":{n:"UNLV",c:"#CF0A2C",t:"#666666",a:"UNLV"},
+  "newmexico":{n:"New Mexico",c:"#BA0C2F",t:"#63666A",a:"UNM"},
+  "sandiegostate":{n:"San Diego State",c:"#A6192E",t:"#000000",a:"SDSU"},
+  "hawaii":{n:"Hawaii",c:"#024731",t:"#ffffff",a:"HAW"},
+  "oregonstate":{n:"Oregon State",c:"#DC4405",t:"#000000",a:"ORST"},
+};
+// a few name variants the score bug may show
+const OPP_ALIAS = {
+  "mississippi":"olemiss", "southerncalifornia":"usc", "pitt":"pittsburgh",
+  "miamifl":"miami", "hawaii":"hawaii", "ulm":"ulmonroe", "usf":"southflorida",
+  "ncst":"ncstate", "texasa":"texasam", "tamu":"texasam",
+};
+
 const $ = s => document.querySelector(s);
 const esc = s => (s||"").replace(/[&<>"]/g,c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 const tabs = ["live","final"];
@@ -318,7 +443,7 @@ function mergedCard(group){
       ${teamRow(sc.home, homeT, sc.homeScore, hLead, sc.possession==="home")}
     </div>
     <div class="status">${statusHtml(sc)}</div>
-    <div class="foot"><span class="who">${group.map(s=>esc(s.coach)).join(" vs ")} · both live</span>
+    <div class="foot"><span class="who">${group.map(s=>esc(s.coach)).join(" vs ")} · both live<span class="who-sub">${group.map(s=>"@"+esc(s.twitch)).join("  ·  ")}</span></span>
       <div class="btns">
         <button class="edit" onclick="editScore('${esc(best.twitch)}','${esc(best.coach)}')">✎</button>
         ${watches}
@@ -448,7 +573,7 @@ function card(s){
         ${teamRow(sc.home, homeT, sc.homeScore, hLead, sc.possession==="home")}
       </div>
       <div class="status">${statusHtml(sc)}</div>
-      <div class="foot"><span class="who">${esc(s.coach)} streaming · ${liveLen(s.startedAt)}</span>
+      <div class="foot"><span class="who">${esc(s.coach)} · ${liveLen(s.startedAt)}<span class="who-sub">@${esc(s.twitch)}</span></span>
         <div class="btns">
           <button class="edit" onclick="editScore('${esc(s.twitch)}','${esc(s.coach)}')">✎</button>
           <a class="watch" href="${s.url}" target="_blank">Watch ▶</a>
@@ -466,7 +591,7 @@ function card(s){
     </div></div>
     <div class="solo"><div class="title">${esc(s.title)}</div>
       <div class="await">⏳ Score appears once the scoreboard is on screen</div></div>
-    <div class="foot"><span class="who">@${esc(s.twitch)} · ${liveLen(s.startedAt)}</span>
+    <div class="foot"><span class="who">${esc(s.coach)} · ${liveLen(s.startedAt)}<span class="who-sub">@${esc(s.twitch)}</span></span>
       <div class="btns">
         <button class="edit" onclick="editScore('${esc(s.twitch)}','${esc(s.coach)}')">✎ score</button>
         <a class="watch" href="${s.url}" target="_blank">Watch ▶</a>
@@ -479,10 +604,11 @@ function card(s){
 const titleCase = s => (s||"").toString().toLowerCase().replace(/\b[a-z]/g, m => m.toUpperCase());
 function teamRow(abbr, tcol, score, lead, poss){
   const name = nameFromAbbr(abbr);
-  const col  = name ? TEAMS[name] : DEFT;
+  const opp  = name ? null : resolveOpp(abbr);
+  const col  = name ? TEAMS[name] : (opp || DEFT);
   const raw  = (abbr||"").toString().trim();
-  const chip = name ? col.a : (normT(raw).slice(0,4).toUpperCase() || "—");
-  const display = name || titleCase(raw) || "Team";
+  const chip = (name||opp) ? col.a : (normT(raw).slice(0,4).toUpperCase() || "—");
+  const display = name || (opp && opp.n) || titleCase(raw) || "Team";
   const ball = poss ? ' <span class="poss" title="Has the ball">🏈</span>' : '';
   return `<div class="team ${lead?'lead':(score!=null?'trail':'')}">
     <div class="logo" style="background:${col.c};color:${col.t}">${esc(chip)}</div>
@@ -512,6 +638,17 @@ function nameFromAbbr(ab){
   return null;
 }
 function fullFromAbbr(ab){ return nameFromAbbr(ab); }
+
+// Resolve a non-roster FBS opponent (Michigan, Ohio State, …) to its color entry.
+function resolveOpp(ab){
+  const o = normT(ab);
+  if(!o) return null;
+  if(OPP[o]) return OPP[o];
+  if(OPP_ALIAS[o]) return OPP[OPP_ALIAS[o]];
+  for(const k in OPP){ if(k.length>=5 && (o.includes(k)||k.includes(o))) return OPP[k]; }
+  if(o.length>=5){ let best=null,bs=0; for(const k in OPP){ if(k.length<6) continue; const s=sim(o,k); if(s>bs){bs=s;best=OPP[k];} } if(bs>=0.72) return best; }
+  return null;
+}
 
 // ---------- FINAL (completed games) ----------
 let COACH_TEAM = {};
