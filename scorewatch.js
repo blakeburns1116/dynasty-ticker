@@ -309,6 +309,24 @@ async function postLeadChange(sc, streams, trailTeam, htMargin) {
     gameEmbed(sc, streams, `**${trailTeam}** trailed ${htMargin} at the half and just TOOK THE LEAD${clk}`, 0x16a34a));
 }
 
+// Fire a one-off test alert through the CONFIGURED webhook and report the result,
+// so we can confirm the Discord integration end to end without a real close game.
+export async function sendTestAlert() {
+  if (!DISCORD_WEBHOOK) return { configured: false };
+  const embed = gameEmbed(
+    { away: "San Jose State", home: "Stanford", awayScore: 21, homeScore: 24, clock: "2:00" },
+    [{ coach: "Tev", url: "https://twitch.tv/tevg_32" }],
+    "3 apart heading into the 4th — **this is a test, ignore**", 0xe11d48);
+  try {
+    const r = await fetch(DISCORD_WEBHOOK, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "🔥 **CLOSE GAME — test alert (ignore)**", embeds: [embed] }),
+    });
+    const body = await r.text().catch(() => "");
+    return { configured: true, status: r.status, ok: r.ok, body: body.slice(0, 200) };
+  } catch (e) { return { configured: true, error: e.message }; }
+}
+
 // Detect, once per game and league-wide, a confirmed dynasty game that either
 // (a) has staged a multi-score comeback by the 4th (upset brewing), or
 // (b) is simply within one score entering the 4th. Head-to-head streams collapse

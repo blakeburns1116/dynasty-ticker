@@ -254,6 +254,11 @@ app.get("/api/debug", (_req, res) => {
     })),
   });
 });
+// One-off Discord test through the configured webhook (gated by a simple key).
+app.get("/api/test-alert", async (req, res) => {
+  if (req.query.key !== "gameday") return res.status(403).json({ error: "bad key" });
+  res.json(await scorewatch.sendTestAlert());
+});
 app.get("/api/weekly", (_req, res) => res.json(weeklyRollup()));
 app.get("/api/schedule", (_req, res) => res.json(getSchedule()));
 app.get("/api/members", (_req, res) => res.json({ members: getMembers() }));
