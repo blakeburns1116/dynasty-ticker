@@ -75,6 +75,10 @@
   .game.changed { animation:scoreflash 2.2s ease-out; }
   .soundbtn { background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); color:#fff; cursor:pointer;
     border-radius:999px; padding:7px 12px; font-size:12px; font-weight:600; }
+  .clearrow { display:flex; justify-content:flex-end; margin-top:22px; }
+  .clearall { background:#fff; border:1px solid var(--live); color:var(--live); font-weight:700; font-size:13px;
+    padding:9px 15px; border-radius:10px; cursor:pointer; }
+  .clearall:hover { background:var(--live); color:#fff; }
   .team.lead .score { color:var(--ink); }
   .team.trail { opacity:.62; }
 
@@ -396,8 +400,15 @@ async function renderFinal(){
       <h3>No finals yet</h3><div>When a game wraps, its final score lands here automatically.</div></div>`;
     return;
   }
-  $("#final").innerHTML = `<p class="section-note">${finals.length} game${finals.length>1?'s':''} final</p>`
-    + `<div class="grid">${finals.map(finalCard).join("")}</div>`;
+  $("#final").innerHTML = `<p class="section-note">${finals.length} game${finals.length>1?'s':''} final · kept 48 hours</p>`
+    + `<div class="grid">${finals.map(finalCard).join("")}</div>`
+    + `<div class="clearrow"><button class="clearall" onclick="clearAllFinals()">🗑 Clear all finals</button></div>`;
+}
+
+async function clearAllFinals(){
+  if(!confirm("Clear ALL final scores? Use this when rolling to a new week.")) return;
+  const r = await pwFetch("/api/finals","DELETE");
+  if(r) refresh();
 }
 
 function finalCard(g){
