@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Dynasty Live</title>
+<title>Aftermath College Game Day</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Saira+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg:#0b1020; --bg2:#121a30; --card:#ffffff; --ink:#0e1526; --muted:#6b7488;
@@ -22,8 +25,14 @@
   /* header */
   header { padding:22px 4px 16px; color:#fff; }
   .brand { display:flex; align-items:center; gap:12px; }
-  .brand h1 { margin:0; font-size:26px; font-weight:800; letter-spacing:-.3px; }
+  .brand h1 { margin:0; font-family:"Saira Condensed","Oswald",sans-serif; font-size:40px; font-weight:800;
+    letter-spacing:.6px; text-transform:uppercase; line-height:.95;
+    background:linear-gradient(92deg,#ff6a1a 0%,#ffd200 38%,#22c55e 68%,#38bdf8 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent; }
   .brand .ball { font-size:26px; }
+  .logo-img { height:78px; width:78px; border-radius:12px; flex:0 0 auto; object-fit:cover;
+    box-shadow:0 2px 10px rgba(0,0,0,.45); }
+  @media (max-width:560px){ .logo-img{ height:60px; width:60px; } }
   .sub { margin:6px 0 0 2px; color:#9fb0d0; font-size:14px; font-weight:500; }
   .livecount { margin-left:auto; background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
     color:#fff; padding:7px 13px; border-radius:999px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:7px; }
@@ -53,13 +62,19 @@
   .rows { padding:6px 14px 4px; }
   .team { display:flex; align-items:center; gap:11px; padding:8px 0; }
   .team + .team { border-top:1px solid var(--line); }
-  .logo { width:38px; height:38px; border-radius:9px; display:flex; align-items:center; justify-content:center;
-    font-size:12px; font-weight:800; color:#fff; flex:0 0 auto; letter-spacing:.2px; }
-  .tname { font-weight:700; font-size:15px; line-height:1.15; }
+  .logo { width:42px; height:42px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+    font-family:"Saira Condensed","Oswald",sans-serif; font-size:14px; font-weight:800; color:#fff; flex:0 0 auto;
+    letter-spacing:.5px; box-shadow:inset 0 -3px 0 rgba(0,0,0,.22), 0 1px 2px rgba(0,0,0,.15); }
+  .tname { font-family:"Oswald",sans-serif; font-weight:600; font-size:17px; line-height:1.1; letter-spacing:.2px; }
   .tsub { color:var(--muted); font-size:12px; font-weight:500; }
   .rank { color:var(--muted); font-size:12px; font-weight:800; margin-right:4px; vertical-align:1px; }
   .rec { color:var(--muted); font-size:12px; font-weight:600; }
-  .score { margin-left:auto; font-size:30px; font-weight:800; letter-spacing:-1px; font-variant-numeric:tabular-nums; }
+  .score { margin-left:auto; font-family:"Saira Condensed","Oswald",sans-serif; font-size:34px; font-weight:800;
+    letter-spacing:0; font-variant-numeric:tabular-nums; }
+  @keyframes scoreflash { 0%{box-shadow:0 0 0 3px var(--live), var(--shadow);} 60%{box-shadow:0 0 0 3px var(--live), var(--shadow);} 100%{box-shadow:var(--shadow);} }
+  .game.changed { animation:scoreflash 2.2s ease-out; }
+  .soundbtn { background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18); color:#fff; cursor:pointer;
+    border-radius:999px; padding:7px 12px; font-size:12px; font-weight:600; }
   .team.lead .score { color:var(--ink); }
   .team.trail { opacity:.62; }
 
@@ -130,11 +145,12 @@
 <div class="wrap">
   <header>
     <div class="brand">
-      <span class="ball">🏈</span>
+      <img class="logo-img" src="/aftermath_logo.png" alt="The Aftermath CFB 27" />
       <div>
-        <h1>Dynasty Live</h1>
+        <h1>College Gameday Live</h1>
         <div class="sub" id="sub">Loading…</div>
       </div>
+      <button class="soundbtn" id="soundbtn" title="Score alert sound">🔔 Alerts: on</button>
       <span class="livecount" id="livecount"><span class="dot"></span> …</span>
     </div>
     <nav>
@@ -218,8 +234,47 @@ async function renderLive(){
   }
   const sorted=[...streams].sort((a,b)=>(b.onDynasty-a.onDynasty)||((b.score?1:0)-(a.score?1:0))||(b.viewers-a.viewers));
   $("#live").innerHTML =
-    `<p class="section-note">${onD.length} playing the dynasty${streams.length-onD.length? ` · ${streams.length-onD.length} streaming something else`:""}</p>`
+    `<p class="section-note">${onD.length} playing the dynasty</p>`
     + `<div class="grid">${sorted.map(card).join("")}</div>`;
+  flashChanges(sorted);
+}
+
+// ---- score-change red flash + alert sound ----
+const LAST_SIG = {};
+function flashChanges(streams){
+  streams.forEach(s=>{
+    const sc=s.score; if(!sc || (sc.awayScore==null && sc.homeScore==null)) return;
+    const sig = `${sc.awayScore}-${sc.homeScore}`;
+    const prev = LAST_SIG[s.twitch];
+    if(prev!==undefined && prev!==sig){
+      const el = document.querySelector(`#live [data-twitch="${s.twitch}"]`);
+      if(el){ el.classList.remove("changed"); void el.offsetWidth; el.classList.add("changed"); }
+      playAlert();
+    }
+    LAST_SIG[s.twitch]=sig;
+  });
+}
+let SOUND_ON=true, actx=null;
+function unlockAudio(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==="suspended") actx.resume(); }catch{} }
+function playAlert(){ if(!SOUND_ON) return; unlockAudio(); if(!actx) return;
+  const t=actx.currentTime, o=actx.createOscillator(), g=actx.createGain();
+  o.type="triangle"; o.frequency.setValueAtTime(784,t); o.frequency.setValueAtTime(1175,t+0.11);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.3,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.4);
+  o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t+0.42);
+}
+document.addEventListener("click", unlockAudio, {once:true});
+{ const sb=document.getElementById("soundbtn");
+  if(sb) sb.onclick=()=>{ SOUND_ON=!SOUND_ON; unlockAudio(); sb.textContent=SOUND_ON?"🔔 Alerts: on":"🔕 Alerts: off"; }; }
+
+// ---- password-guarded edits ----
+let PW_CACHE = null;
+async function pwFetch(url, method, body){
+  let pw = PW_CACHE || prompt("Enter the submit password:");
+  if(pw===null || pw==="") return null;
+  const res = await fetch(url,{method, headers:{"Content-Type":"application/json","x-edit-password":pw}, body: body?JSON.stringify(body):undefined});
+  if(res.status===403){ PW_CACHE=null; alert("Wrong password — try again."); return null; }
+  PW_CACHE = pw;
+  return res;
 }
 
 function card(s){
@@ -246,7 +301,7 @@ function card(s){
     const srcCls = sc.stale?"src stale":(sc.source==="manual"?"src manual":"src");
     const srcTxt = sc.stale?"reading stale":(sc.source==="manual"?"entered":"auto");
     const stat = [sc.quarter?`<span class="q">${esc(sc.quarter)}</span>`:"", sc.clock?`<span class="clk">${esc(sc.clock)}</span>`:""].filter(Boolean).join(" · ") || "LIVE";
-    return `<div class="game">
+    return `<div class="game" data-twitch="${esc(s.twitch)}">
       <div class="stripe" style="background:linear-gradient(90deg,${awayT.c} 50%, ${homeT.c} 50%)"></div>
       <div class="top"><span class="badge-live"><span class="d"></span>LIVE</span><span class="eyes">👁 ${s.viewers}</span></div>
       <div class="rows">
@@ -262,7 +317,7 @@ function card(s){
     </div>`;
   }
   // on dynasty but no score yet
-  return `<div class="game">
+  return `<div class="game" data-twitch="${esc(s.twitch)}">
     <div class="stripe" style="background:${my.c}"></div>
     <div class="top"><span class="badge-live"><span class="d"></span>LIVE</span><span class="eyes">👁 ${s.viewers}</span></div>
     <div class="rows"><div class="team">
@@ -365,22 +420,20 @@ function finalCard(g){
 async function editFinal(id, coach){
   const cur = prompt(`Final score for ${coach}.\nFormat: awayAbbr awayScore homeAbbr homeScore\nExample: GASO 21 APP 17\n(leave blank to remove this game)`, "");
   if(cur===null) return;
-  if(cur.trim()===""){ await fetch("/api/final/"+encodeURIComponent(id),{method:"DELETE"}); return refresh(); }
+  if(cur.trim()===""){ const r=await pwFetch("/api/final/"+encodeURIComponent(id),"DELETE"); if(r) refresh(); return; }
   const p=cur.trim().split(/\s+/);
-  await fetch("/api/final/"+encodeURIComponent(id),{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({away:p[0],awayScore:p[1],home:p[2],homeScore:p[3]})});
-  refresh();
+  const r=await pwFetch("/api/final/"+encodeURIComponent(id),"POST",{away:p[0],awayScore:p[1],home:p[2],homeScore:p[3]});
+  if(r) refresh();
 }
 
 // ---------- manual score ----------
 async function editScore(twitch, coach){
   const cur = prompt(`Enter the score for ${coach}.\nFormat: awayAbbr awayScore homeAbbr homeScore quarter clock\nExample: JMU 0 DEL 7 1ST 3:18\n(leave blank to clear)`, "");
   if(cur===null) return;
-  if(cur.trim()===""){ await fetch("/api/score/"+encodeURIComponent(twitch),{method:"DELETE"}); return refresh(); }
+  if(cur.trim()===""){ const r=await pwFetch("/api/score/"+encodeURIComponent(twitch),"DELETE"); if(r) refresh(); return; }
   const p=cur.trim().split(/\s+/);
-  await fetch("/api/score/"+encodeURIComponent(twitch),{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({away:p[0],awayScore:p[1],home:p[2],homeScore:p[3],quarter:p[4],clock:p[5],coach})});
-  refresh();
+  const r=await pwFetch("/api/score/"+encodeURIComponent(twitch),"POST",{away:p[0],awayScore:p[1],home:p[2],homeScore:p[3],quarter:p[4],clock:p[5],coach});
+  if(r) refresh();
 }
 
 async function refresh(){
