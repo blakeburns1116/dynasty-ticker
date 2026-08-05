@@ -198,10 +198,19 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
         const bothScores = r.ok && r.awayScore != null && r.homeScore != null;
         if (r.ok && (bothScores || (r.confidence ?? 0) >= MIN_CONF)) {
           const st = liveByLogin.get(login) || {};
+          const prev = scores[login];
           // sticky: once a read shows their team, stay confirmed for the session
-          const confirmed = scores[login]?.dynastyConfirmed || scoreConfirmsTeam(r, st.team);
+          const confirmed = prev?.dynastyConfirmed || scoreConfirmsTeam(r, st.team);
+          // Scores never go backwards within a game. Guards against garbage
+          // end-of-game camera reads: a lower/blank read keeps the prior value.
+          let a = r.awayScore, h = r.homeScore;
+          if (prev && prev.startedAt === (st.startedAt || null)) {
+            if (a == null || (prev.awayScore != null && a < prev.awayScore)) a = prev.awayScore;
+            if (h == null || (prev.homeScore != null && h < prev.homeScore)) h = prev.homeScore;
+          }
           scores[login] = {
-            ...r, source: "cv", updatedAt: new Date().toISOString(),
+            ...r, awayScore: a, homeScore: h,
+            source: "cv", updatedAt: new Date().toISOString(),
             coach: st.coach || null, team: st.team || null, startedAt: st.startedAt || null,
             dynastyConfirmed: !!confirmed,
           };

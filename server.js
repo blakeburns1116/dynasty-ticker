@@ -247,18 +247,29 @@ app.get("/api/schedule", (_req, res) => res.json(getSchedule()));
 app.get("/api/members", (_req, res) => res.json({ members: getMembers() }));
 app.get("/api/standings", (_req, res) => res.json(getStandings()));
 
+// Editing/clearing scores requires a shared password so players can't wipe scores.
+const SUBMIT_PW = process.env.SUBMIT_PASSWORD || "SYBAU";
+const pwOK = req => (req.body && req.body.password === SUBMIT_PW) || req.get("x-edit-password") === SUBMIT_PW;
+
 // Completed games (auto-archived when a stream ends).
 app.get("/api/finals", (_req, res) => res.json({ finals: scorewatch.getFinals() }));
-app.post("/api/final/:id", (req, res) => res.json(scorewatch.editFinal(req.params.id, req.body || {}) || {}));
-app.delete("/api/final/:id", (req, res) => { scorewatch.removeFinal(req.params.id); res.json({ ok: true }); });
+app.post("/api/final/:id", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  res.json(scorewatch.editFinal(req.params.id, req.body || {}) || {});
+});
+app.delete("/api/final/:id", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  scorewatch.removeFinal(req.params.id); res.json({ ok: true });
+});
 
 // Manual live score override (always beats the camera read until cleared).
 app.post("/api/score/:twitch", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
   res.json(scorewatch.setManual(req.params.twitch, req.body || {}));
 });
 app.delete("/api/score/:twitch", (req, res) => {
-  scorewatch.clearScore(req.params.twitch);
-  res.json({ ok: true });
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  scorewatch.clearScore(req.params.twitch); res.json({ ok: true });
 });
 
 scorewatch.initStore(DATA_DIR);
