@@ -23,7 +23,7 @@ const SCORE_DIR = path.join(__dirname, "score");
 const ENABLED = process.env.SCORE_ENABLED === "1";
 const INTERVAL = Number(process.env.SCORE_SECONDS || 25) * 1000;
 const CONCURRENCY = Number(process.env.SCORE_CONCURRENCY || 3);
-const MIN_CONF = Number(process.env.SCORE_MIN_CONFIDENCE || 0.4);
+const MIN_CONF = Number(process.env.SCORE_MIN_CONFIDENCE || 0.22);
 const FRAME_TTL = Number(process.env.SCORE_STALE_SECONDS || 120) * 1000;
 
 // login -> { away, home, awayScore, homeScore, quarter, clock, confidence, source, updatedAt, coach, team, startedAt }

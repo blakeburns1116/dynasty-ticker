@@ -31,7 +31,8 @@ export const TEAM_ALIASES = {
   "Wyoming":              ["wyoming", "wyo"],
 };
 
-const norm = s => (s || "").toString().toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+// lowercase, drop punctuation AND spaces so "BALLSTATE" matches "ball state"
+const norm = s => (s || "").toString().toLowerCase().replace(/[^a-z0-9]/g, "");
 
 // Does an OCR'd team string refer to `teamName`?
 // Match only when the OCR text EQUALS an alias, or CONTAINS a full alias (>=4 chars).
@@ -40,7 +41,7 @@ const norm = s => (s || "").toString().toLowerCase().replace(/[^a-z0-9 ]/g, "").
 export function matchesTeam(ocrText, teamName) {
   const o = norm(ocrText);
   if (!o) return false;
-  const aliases = TEAM_ALIASES[teamName] || [norm(teamName)];
+  const aliases = (TEAM_ALIASES[teamName] || [teamName]).map(norm);
   return aliases.some(a => a === o || (a.length >= 4 && o.includes(a)));
 }
 
