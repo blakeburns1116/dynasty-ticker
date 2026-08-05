@@ -149,16 +149,40 @@ def norm_clock(s):
 
 
 def norm_quarter(s):
-    s = s.upper()
-    # find an ordinal like 1ST/2ND/3RD/4TH anywhere in the (often noisy) text
+    s = (s or "").upper()
+    s2 = s.replace(" ", "")
+    # 1) full ordinal like 1ST/2ND/3RD/4TH
     m = re.search(r"([1-4])\s*(ST|ND|RD|TH)", s)
     if m:
         return f"{m.group(1)}{m.group(2)}"
-    s2 = s.replace(" ", "")
-    for q in QUARTERS:
-        if q in s2:
+    # 2) explicit special periods
+    if "FINAL" in s2: return "FINAL"
+    if "HALF" in s2:  return "HALF"
+    if "OT" in s2:    return "OT"
+    # 3) a lone quarter digit 1-4
+    d = re.search(r"[1-4]", s)
+    if d:
+        return {"1": "1ST", "2": "2ND", "3": "3RD", "4": "4TH"}[d.group(0)]
+    # 4) just the ordinal suffix (the digit often OCRs worse than the suffix)
+    for suf, q in (("ND", "2ND"), ("RD", "3RD"), ("TH", "4TH"), ("ST", "1ST")):
+        if suf in s2:
             return q
     return None
+
+
+# Quarter is tiny; read it across several OCR passes and keep the first that parses.
+def read_quarter(cell):
+    if cell is None or cell.size == 0:
+        return None, 0.0
+    img = prep(cell)
+    parts = []
+    for psm in (7, 8, 10, 13, 6):
+        cfg = f"--psm {psm} -c tessedit_char_whitelist=0123456789STNDRDTHOTHALFINstndrdth"
+        t = pytesseract.image_to_string(img, config=cfg).strip()
+        if t:
+            parts.append(t)
+    q = norm_quarter(" ".join(parts))
+    return q, (0.6 if q else 0.0)
 
 
 def read(path, template):
@@ -171,13 +195,12 @@ def read(path, template):
     home, ch = ocr(crop_frac(img, f["home"]), "alpha")
     asc, cas = ocr(crop_frac(img, f["awayScore"]), "digits")
     hsc, chs = ocr(crop_frac(img, f["homeScore"]), "digits")
-    qtr, cq = ocr(crop_frac(img, f["quarter"]), "quarter")
+    quarter, cq = read_quarter(crop_frac(img, f["quarter"]))
     clk, cc = ocr(crop_frac(img, f["clock"]), "clock")
 
     away_score = parse_int(asc)
     home_score = parse_int(hsc)
     clock = norm_clock(clk)
-    quarter = norm_quarter(qtr)
 
     # Gameplay sanity gate: a real score bug shows a clock AND at least one score.
     # If neither reads, we're almost certainly not looking at live gameplay.
