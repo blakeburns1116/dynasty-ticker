@@ -42,6 +42,8 @@ const QRANK = { "1ST": 1, "2ND": 2, "HALF": 2.5, "3RD": 3, "4TH": 4, "OT": 5, "F
 const DISCORD_WEBHOOK = (process.env.DISCORD_WEBHOOK_URL || "").trim();
 const DISCORD_MENTION = (process.env.DISCORD_MENTION || "").trim();
 const CLOSE_MARGIN = Number(process.env.CLOSE_GAME_MARGIN || 8); // one-score = close
+// "upset/comeback": trailing team was down at least this much at half...
+const COMEBACK_MIN = Number(process.env.COMEBACK_MIN_MARGIN || 9); // ...more than one score
 // per-matchup memory so the ping fires once per game, league-wide (not per viewer)
 let alertState = {};
 
@@ -210,39 +212,52 @@ function matchupKey(sc) {
 }
 
 const SITE_URL = process.env.SITE_URL || "https://dynasty-ticker-production.up.railway.app";
-async function postCloseGame(sc, streams, margin) {
-  const A = resolveTeam(sc.away) || sc.away || "Away";
-  const B = resolveTeam(sc.home) || sc.home || "Home";
-  const scoreLine = `**${A} ${sc.awayScore}**  —  **${B} ${sc.homeScore}**`;
-  const clk = sc.clock ? ` · ${sc.clock} on the clock` : "";
-  const watch = streams.map(s => `[${s.coach}](${s.url})`).join("  ·  ");
-  const fields = [];
-  // prominent, button-style link to the live board (webhooks can't send real
-  // buttons — that needs a bot — so this hyperlink is the one-tap equivalent)
-  fields.push({ name: "​", value: `**▶  [WATCH ON GAMEDAY LIVE](${SITE_URL})**` });
-  if (watch) fields.push({ name: "Coaches streaming", value: watch });
-  const body = {
-    content: (DISCORD_MENTION ? DISCORD_MENTION + " " : "") + "🔥 **CLOSE GAME — entering the 4th quarter!**",
-    embeds: [{
-      title: "🏈 Aftermath College Gameday Live",
-      url: SITE_URL,
-      description: `${scoreLine}\n${margin === 0 ? "Tied" : margin + " apart"} heading into the 4th${clk}`,
-      color: 0xe11d48,
-      fields,
-      footer: { text: "College Gameday Live · tap the title or the button above" },
-    }],
-  };
+
+// Low-level webhook send.
+async function sendDiscord(content, embed) {
   try {
     const res = await fetch(DISCORD_WEBHOOK, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, embeds: [embed] }),
     });
     if (!res.ok) console.error("Discord webhook HTTP", res.status);
-    else console.log(`Discord close-game ping sent: ${A} vs ${B}`);
   } catch (e) { console.error("Discord webhook failed:", e.message); }
 }
 
-// Detect a confirmed dynasty game turning into a one-score 4th quarter and ping
-// Discord once. Head-to-head streams collapse to one matchup key, so one ping.
+// Shared embed: score line + a button-style Gameday Live link + coach streams.
+// (A plain webhook can't render real Discord buttons — that needs a bot — so the
+// bold hyperlink is the one-tap equivalent.)
+function gameEmbed(sc, streams, subtitle, color) {
+  const A = resolveTeam(sc.away) || sc.away || "Away";
+  const B = resolveTeam(sc.home) || sc.home || "Home";
+  const watch = streams.map(s => `[${s.coach}](${s.url})`).join("  ·  ");
+  const fields = [{ name: "​", value: `**▶  [WATCH ON GAMEDAY LIVE](${SITE_URL})**` }];
+  if (watch) fields.push({ name: "Coaches streaming", value: watch });
+  return {
+    title: "🏈 Aftermath College Gameday Live", url: SITE_URL,
+    description: `**${A} ${sc.awayScore}**  —  **${B} ${sc.homeScore}**\n${subtitle}`,
+    color, fields, footer: { text: "College Gameday Live · tap the title or the button above" },
+  };
+}
+const mention = () => (DISCORD_MENTION ? DISCORD_MENTION + " " : "");
+
+async function postCloseGame(sc, streams, margin) {
+  const clk = sc.clock ? ` · ${sc.clock} on the clock` : "";
+  await sendDiscord(mention() + "🔥 **CLOSE GAME — entering the 4th quarter!**",
+    gameEmbed(sc, streams, `${margin === 0 ? "Tied" : margin + " apart"} heading into the 4th${clk}`, 0xe11d48));
+}
+
+async function postComeback(sc, streams, trailTeam, htMargin, nowText) {
+  const clk = sc.clock ? ` · ${sc.clock} to play` : "";
+  await sendDiscord(mention() + "🔄 **UPSET BREWING — big comeback into the 4th!**",
+    gameEmbed(sc, streams, `**${trailTeam}** were down ${htMargin} at the half — ${nowText} in the 4th${clk}`, 0xf59e0b));
+}
+
+// Detect, once per game and league-wide, a confirmed dynasty game that either
+// (a) has staged a multi-score comeback by the 4th (upset brewing), or
+// (b) is simply within one score entering the 4th. Head-to-head streams collapse
+// to one matchup key, so it pings once. The halftime margin is snapshotted from
+// the score history — no team records needed.
 async function fireGameAlerts(liveByLogin) {
   if (!DISCORD_WEBHOOK) return;
   const games = new Map(); // key -> { rep, streams:[{coach,url}] }
@@ -258,12 +273,44 @@ async function fireGameAlerts(liveByLogin) {
   for (const [key, g] of games) {
     const sc = g.rep, q = sc.quarter || null;
     const stt = alertState[key] || (alertState[key] = { q: null, fired: {} });
-    // a new game of the same matchup (quarter regressed) resets the ping
-    if (q && stt.q && (QRANK[q] || 0) < (QRANK[stt.q] || 0) - 0.4) stt.fired = {};
-    if (stt.q === null) { stt.q = q; continue; } // baseline on first sight — never ping on boot
-    if (q === "4TH" && stt.q !== "4TH" && !stt.fired.close && hasBothScores(sc)) {
+    const rank = QRANK[q] || 0, prevRank = QRANK[stt.q] || 0;
+    // a new game of the same matchup (quarter regressed) resets everything
+    if (q && stt.q && rank < prevRank - 0.4) { stt.fired = {}; stt.htDone = false; }
+    if (stt.q === null) {
+      // baseline on first sight — never ping on boot. If we're first seeing the
+      // game AT halftime, still grab the halftime score for comeback math.
+      if (q === "HALF" && hasBothScores(sc)) { stt.htDone = true; stt.htAway = sc.awayScore; stt.htHome = sc.homeScore; }
+      stt.q = q; continue;
+    }
+
+    // snapshot the halftime score: at the HALF read, or the first time we cross
+    // out of the 1st half (covers streams where HALF itself never reads cleanly)
+    if (!stt.htDone && hasBothScores(sc) && (q === "HALF" || (prevRank < 2.5 && rank >= 2.5))) {
+      stt.htDone = true; stt.htAway = sc.awayScore; stt.htHome = sc.homeScore;
+    }
+
+    // one big ping at the transition into the 4th: comeback wins over plain close
+    if (q === "4TH" && stt.q !== "4TH" && !stt.fired.big && hasBothScores(sc)) {
+      stt.fired.big = true;
       const margin = Math.abs(sc.awayScore - sc.homeScore);
-      if (margin <= CLOSE_MARGIN) { stt.fired.close = true; await postCloseGame(sc, g.streams, margin); }
+      let sent = false;
+      if (stt.htDone) {
+        const htMargin = Math.abs(stt.htAway - stt.htHome);
+        const htTie = stt.htAway === stt.htHome;
+        const homeLedAtHalf = stt.htHome > stt.htAway;
+        if (!htTie && htMargin >= COMEBACK_MIN) {
+          // deficit NOW for the team that trailed at half (negative => they now lead)
+          const trailAway = !homeLedAtHalf ? false : true; // away trailed if home led
+          const trailNow = trailAway ? (sc.homeScore - sc.awayScore) : (sc.awayScore - sc.homeScore);
+          if (trailNow <= CLOSE_MARGIN) {
+            const trailTeam = resolveTeam(trailAway ? sc.away : sc.home) || (trailAway ? sc.away : sc.home) || "They";
+            const nowText = trailNow < 0 ? "now IN FRONT" : (trailNow === 0 ? "now level" : `now within ${trailNow}`);
+            await postComeback(sc, g.streams, trailTeam, htMargin, nowText);
+            sent = true;
+          }
+        }
+      }
+      if (!sent && margin <= CLOSE_MARGIN) await postCloseGame(sc, g.streams, margin);
     }
     stt.q = q;
   }
