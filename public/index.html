@@ -427,7 +427,7 @@ const liveQuality = s => { const sc=s.score; if(!sc) return -1;
 function mergedCard(group){
   const best = group.slice().sort((a,b)=>liveQuality(b)-liveQuality(a))[0];
   const sc = best.score;
-  const awayT = teamOf(nameFromAbbr(sc.away)||""), homeT = teamOf(nameFromAbbr(sc.home)||"");
+  const awayT = colorFor(sc.away), homeT = colorFor(sc.home);
   const aLead=(sc.awayScore??0)>(sc.homeScore??0), hLead=(sc.homeScore??0)>(sc.awayScore??0);
   const rz = isRedzone(sc);
   const watches = group.map(s=>`<a class="watch" href="${s.url}" target="_blank">▶ ${esc(s.coach)}</a>`).join("");
@@ -560,8 +560,8 @@ function card(s){
     // matchup scoreboard
     const A = { name: sc.away||abbrOf(s.team), col: teamOf(nameFromAbbr(sc.away)||s.team) };
     // the streaming coach's team = my; opponent = the other side
-    const homeT = teamOf(nameFromAbbr(sc.home)||"");
-    const awayT = teamOf(nameFromAbbr(sc.away)||"");
+    const homeT = colorFor(sc.home);
+    const awayT = colorFor(sc.away);
     const aLead = (sc.awayScore??0) > (sc.homeScore??0);
     const hLead = (sc.homeScore??0) > (sc.awayScore??0);
     const rz = isRedzone(sc);
@@ -649,6 +649,8 @@ function resolveOpp(ab){
   if(o.length>=5){ let best=null,bs=0; for(const k in OPP){ if(k.length<6) continue; const s=sim(o,k); if(s>bs){bs=s;best=OPP[k];} } if(bs>=0.72) return best; }
   return null;
 }
+// color entry for any team string: roster team, else FBS opponent, else neutral.
+function colorFor(abbr){ const n=nameFromAbbr(abbr); if(n) return TEAMS[n]; return resolveOpp(abbr) || DEFT; }
 
 // ---------- FINAL (completed games) ----------
 let COACH_TEAM = {};
@@ -689,8 +691,8 @@ async function clearAllFinals(){
 }
 
 function finalCard(g){
-  const aT = teamOf(nameFromAbbr(g.away)||"");
-  const hT = teamOf(nameFromAbbr(g.home)||"");
+  const aT = colorFor(g.away);
+  const hT = colorFor(g.home);
   const aLead=(g.awayScore??0)>(g.homeScore??0), hLead=(g.homeScore??0)>(g.awayScore??0);
   return `<div class="game">
     <div class="stripe" style="background:linear-gradient(90deg,${aT.c} 50%, ${hT.c} 50%)"></div>
