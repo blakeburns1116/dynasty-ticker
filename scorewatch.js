@@ -44,6 +44,9 @@ const DISCORD_MENTION = (process.env.DISCORD_MENTION || "").trim();
 const CLOSE_MARGIN = Number(process.env.CLOSE_GAME_MARGIN || 8); // one-score = close
 // "upset/comeback": trailing team was down at least this much at half...
 const COMEBACK_MIN = Number(process.env.COMEBACK_MIN_MARGIN || 9); // ...more than one score
+// "lead change": the half-underdog was down at least this much at half and then
+// takes the lead during the 4th/OT (the comeback completed live).
+const LEAD_CHANGE_MIN = Number(process.env.LEAD_CHANGE_MIN_MARGIN || 1);
 // per-matchup memory so the ping fires once per game, league-wide (not per viewer)
 let alertState = {};
 
@@ -253,6 +256,12 @@ async function postComeback(sc, streams, trailTeam, htMargin, nowText) {
     gameEmbed(sc, streams, `**${trailTeam}** were down ${htMargin} at the half — ${nowText} in the 4th${clk}`, 0xf59e0b));
 }
 
+async function postLeadChange(sc, streams, trailTeam, htMargin) {
+  const clk = sc.clock ? ` · ${sc.clock} to play` : "";
+  await sendDiscord(mention() + "🚨 **LEAD CHANGE — the comeback is complete!**",
+    gameEmbed(sc, streams, `**${trailTeam}** trailed ${htMargin} at the half and just TOOK THE LEAD${clk}`, 0x16a34a));
+}
+
 // Detect, once per game and league-wide, a confirmed dynasty game that either
 // (a) has staged a multi-score comeback by the 4th (upset brewing), or
 // (b) is simply within one score entering the 4th. Head-to-head streams collapse
@@ -275,7 +284,7 @@ async function fireGameAlerts(liveByLogin) {
     const stt = alertState[key] || (alertState[key] = { q: null, fired: {} });
     const rank = QRANK[q] || 0, prevRank = QRANK[stt.q] || 0;
     // a new game of the same matchup (quarter regressed) resets everything
-    if (q && stt.q && rank < prevRank - 0.4) { stt.fired = {}; stt.htDone = false; }
+    if (q && stt.q && rank < prevRank - 0.4) { stt.fired = {}; stt.htDone = false; stt.trailLed = false; }
     if (stt.q === null) {
       // baseline on first sight — never ping on boot. If we're first seeing the
       // game AT halftime, still grab the halftime score for comeback math.
@@ -286,7 +295,7 @@ async function fireGameAlerts(liveByLogin) {
     // snapshot the halftime score: at the HALF read, or the first time we cross
     // out of the 1st half (covers streams where HALF itself never reads cleanly)
     if (!stt.htDone && hasBothScores(sc) && (q === "HALF" || (prevRank < 2.5 && rank >= 2.5))) {
-      stt.htDone = true; stt.htAway = sc.awayScore; stt.htHome = sc.homeScore;
+      stt.htDone = true; stt.htAway = sc.awayScore; stt.htHome = sc.homeScore; stt.trailLed = false;
     }
 
     // one big ping at the transition into the 4th: comeback wins over plain close
@@ -307,10 +316,29 @@ async function fireGameAlerts(liveByLogin) {
             const nowText = trailNow < 0 ? "now IN FRONT" : (trailNow === 0 ? "now level" : `now within ${trailNow}`);
             await postComeback(sc, g.streams, trailTeam, htMargin, nowText);
             sent = true;
+            if (trailNow < 0) stt.trailLed = true; // already announced in front — don't also fire lead-change
           }
         }
       }
       if (!sent && margin <= CLOSE_MARGIN) await postCloseGame(sc, g.streams, margin);
+    }
+
+    // second, opt-in ping: the half-underdog TAKES THE LEAD during the 4th/OT.
+    // Fires once, only when it wasn't already leading (so it doesn't duplicate the
+    // "now IN FRONT" comeback ping fired at the top of the 4th).
+    if (stt.htDone && hasBothScores(sc)) {
+      const htMargin = Math.abs(stt.htAway - stt.htHome);
+      const homeLedAtHalf = stt.htHome > stt.htAway;
+      if (stt.htAway !== stt.htHome && htMargin >= LEAD_CHANGE_MIN) {
+        const trailAway = homeLedAtHalf; // away trailed at half if home led
+        const trailLeadsNow = trailAway ? (sc.awayScore > sc.homeScore) : (sc.homeScore > sc.awayScore);
+        if ((q === "4TH" || q === "OT") && trailLeadsNow && !stt.trailLed && !stt.fired.lead) {
+          stt.fired.lead = true;
+          const trailTeam = resolveTeam(trailAway ? sc.away : sc.home) || (trailAway ? sc.away : sc.home) || "They";
+          await postLeadChange(sc, g.streams, trailTeam, htMargin);
+        }
+        stt.trailLed = trailLeadsNow; // remember lead state across ticks (also for 3rd-qtr leads)
+      }
     }
     stt.q = q;
   }
