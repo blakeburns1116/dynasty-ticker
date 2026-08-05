@@ -66,3 +66,30 @@ export function scoreConfirmsTeam(score, teamName) {
   if (!score) return false;
   return matchesTeam(score.away, teamName) || matchesTeam(score.home, teamName);
 }
+
+// Map an OCR'd team string to its canonical roster name (or null). Lets the
+// server build ONE stable matchup key for a head-to-head even when the two
+// coaches' streams OCR the names slightly differently.
+export function resolveTeam(ocrText) {
+  const o = norm(ocrText);
+  if (!o) return null;
+  // strong: an exact/contained alias wins immediately
+  for (const name of Object.keys(TEAM_ALIASES)) {
+    const aliases = (TEAM_ALIASES[name] || [name]).map(norm);
+    if (aliases.some(a => a === o || (a.length >= 4 && o.includes(a)))) return name;
+  }
+  // fuzzy: pick the BEST similarity across full-length aliases (avoids the first
+  // over-threshold alias winning, e.g. garbled "EXASSTATE" -> Texas State not Jax State)
+  if (o.length >= 6) {
+    let best = null, bs = 0;
+    for (const name of Object.keys(TEAM_ALIASES)) {
+      for (const a of (TEAM_ALIASES[name] || [name]).map(norm)) {
+        if (a.length < 8) continue;
+        const s = sim(o, a);
+        if (s > bs) { bs = s; best = name; }
+      }
+    }
+    if (bs >= 0.62) return best;
+  }
+  return null;
+}

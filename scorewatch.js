@@ -14,7 +14,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { scoreConfirmsTeam } from "./teams.js";
+import { scoreConfirmsTeam, resolveTeam } from "./teams.js";
 
 const execFileP = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,6 +34,17 @@ const GRAB_GAP_MS = Number(process.env.SCORE_GRAB_GAP_MS || 1000);
 const ARCHIVE_AFTER_MISSES = Number(process.env.SCORE_ARCHIVE_AFTER_MISSES || 2);
 
 const QRANK = { "1ST": 1, "2ND": 2, "HALF": 2.5, "3RD": 3, "4TH": 4, "OT": 5, "FINAL": 6 };
+
+// ---- Discord webhook (optional) ----
+// Set DISCORD_WEBHOOK_URL in the environment to post a message to your league's
+// main chat when a dynasty game gets close entering the 4th quarter. Set
+// DISCORD_MENTION to "@here" (or a role mention) to actually ping the channel.
+const DISCORD_WEBHOOK = (process.env.DISCORD_WEBHOOK_URL || "").trim();
+const DISCORD_MENTION = (process.env.DISCORD_MENTION || "").trim();
+const CLOSE_MARGIN = Number(process.env.CLOSE_GAME_MARGIN || 8); // one-score = close
+// per-matchup memory so the ping fires once per game, league-wide (not per viewer)
+let alertState = {};
+
 const normPair = (a, b) =>
   `${String(a || "").toLowerCase().replace(/[^a-z0-9]/g, "")}|${String(b || "").toLowerCase().replace(/[^a-z0-9]/g, "")}`;
 let misses = {}; // login -> consecutive checks where a scored stream was not live
@@ -188,6 +199,76 @@ async function readOne(login, frameOverride) {
   return best;
 }
 
+// ---- close-game Discord ping (server-side, fires once per game) ----
+const hasBothScores = sc => sc && sc.awayScore != null && sc.homeScore != null;
+const normOne = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+// stable matchup key: canonical team pair (order-independent), no per-stream startedAt
+function matchupKey(sc) {
+  const a = resolveTeam(sc.away) || normOne(sc.away);
+  const b = resolveTeam(sc.home) || normOne(sc.home);
+  return [a, b].sort().join("|");
+}
+
+const SITE_URL = process.env.SITE_URL || "https://dynasty-ticker-production.up.railway.app";
+async function postCloseGame(sc, streams, margin) {
+  const A = resolveTeam(sc.away) || sc.away || "Away";
+  const B = resolveTeam(sc.home) || sc.home || "Home";
+  const scoreLine = `**${A} ${sc.awayScore}**  —  **${B} ${sc.homeScore}**`;
+  const clk = sc.clock ? ` · ${sc.clock} on the clock` : "";
+  const watch = streams.map(s => `[${s.coach}](${s.url})`).join("  ·  ");
+  const fields = [];
+  // prominent, button-style link to the live board (webhooks can't send real
+  // buttons — that needs a bot — so this hyperlink is the one-tap equivalent)
+  fields.push({ name: "​", value: `**▶  [WATCH ON GAMEDAY LIVE](${SITE_URL})**` });
+  if (watch) fields.push({ name: "Coaches streaming", value: watch });
+  const body = {
+    content: (DISCORD_MENTION ? DISCORD_MENTION + " " : "") + "🔥 **CLOSE GAME — entering the 4th quarter!**",
+    embeds: [{
+      title: "🏈 Aftermath College Gameday Live",
+      url: SITE_URL,
+      description: `${scoreLine}\n${margin === 0 ? "Tied" : margin + " apart"} heading into the 4th${clk}`,
+      color: 0xe11d48,
+      fields,
+      footer: { text: "College Gameday Live · tap the title or the button above" },
+    }],
+  };
+  try {
+    const res = await fetch(DISCORD_WEBHOOK, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (!res.ok) console.error("Discord webhook HTTP", res.status);
+    else console.log(`Discord close-game ping sent: ${A} vs ${B}`);
+  } catch (e) { console.error("Discord webhook failed:", e.message); }
+}
+
+// Detect a confirmed dynasty game turning into a one-score 4th quarter and ping
+// Discord once. Head-to-head streams collapse to one matchup key, so one ping.
+async function fireGameAlerts(liveByLogin) {
+  if (!DISCORD_WEBHOOK) return;
+  const games = new Map(); // key -> { rep, streams:[{coach,url}] }
+  for (const [login, st] of liveByLogin) {
+    const sc = scores[login];
+    if (!sc || !sc.dynastyConfirmed) continue;  // only real, confirmed dynasty games
+    const key = matchupKey(sc);
+    let g = games.get(key);
+    if (!g) { g = { rep: sc, streams: [] }; games.set(key, g); }
+    g.streams.push({ coach: st.coach || sc.coach || login, url: st.url || `https://twitch.tv/${login}` });
+    if (hasBothScores(sc) && !hasBothScores(g.rep)) g.rep = sc; // prefer a full read as representative
+  }
+  for (const [key, g] of games) {
+    const sc = g.rep, q = sc.quarter || null;
+    const stt = alertState[key] || (alertState[key] = { q: null, fired: {} });
+    // a new game of the same matchup (quarter regressed) resets the ping
+    if (q && stt.q && (QRANK[q] || 0) < (QRANK[stt.q] || 0) - 0.4) stt.fired = {};
+    if (stt.q === null) { stt.q = q; continue; } // baseline on first sight — never ping on boot
+    if (q === "4TH" && stt.q !== "4TH" && !stt.fired.close && hasBothScores(sc)) {
+      const margin = Math.abs(sc.awayScore - sc.homeScore);
+      if (margin <= CLOSE_MARGIN) { stt.fired.close = true; await postCloseGame(sc, g.streams, margin); }
+    }
+    stt.q = q;
+  }
+}
+
 // Update scores for all currently-live on-dynasty streams.
 export async function updateScores(liveStreams, { frameFor } = {}) {
   const liveByLogin = new Map(
@@ -231,6 +312,9 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
       }
     }));
   }
+
+  // Ping Discord once when a confirmed dynasty game turns into a close 4th quarter.
+  try { await fireGameAlerts(liveByLogin); } catch (e) { console.error("alert error:", e.message); }
 
   // Undo premature/false finals: if a game is live again with a score, it isn't
   // final. Drop any final for the same stream OR the same team matchup.
