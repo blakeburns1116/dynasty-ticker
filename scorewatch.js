@@ -368,6 +368,15 @@ async function fireGameAlerts(liveByLogin) {
         }
       }
       if (!sent && margin <= CLOSE_MARGIN) await postCloseGame(sc, g.streams, margin);
+      if (sent || margin <= CLOSE_MARGIN) stt.fired.close = true; // closeness already announced
+    }
+
+    // One-score game in the 4th/OT, fired once — catches games that TIGHTEN to
+    // within a score after the quarter began (or that the server first saw mid-4th
+    // after a restart, so the transition ping above was missed).
+    if ((q === "4TH" || q === "OT") && hasBothScores(sc) && !stt.fired.close) {
+      const m = Math.abs(sc.awayScore - sc.homeScore);
+      if (m <= CLOSE_MARGIN) { stt.fired.close = true; await postCloseGame(sc, g.streams, m); }
     }
 
     // second, opt-in ping: the half-underdog TAKES THE LEAD during the 4th/OT.
