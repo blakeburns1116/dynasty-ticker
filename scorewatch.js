@@ -105,6 +105,24 @@ function archiveFinal(login, sc) {
   persistFinals();
 }
 
+// Manually add (or upsert) a completed game to the Final board. Used to restore
+// finals that were lost, or to log a game the reader never saw.
+export function addFinal(data) {
+  const away = data.away || null, home = data.home || null;
+  const key = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const id = data.id || `add_${key(away)}_${key(home)}`;
+  const rec = {
+    id, twitch: data.twitch || id,
+    coach: data.coach || "", team: data.team || "",
+    away, home, awayScore: num(data.awayScore), homeScore: num(data.homeScore),
+    endedAt: new Date().toISOString(), source: "manual",
+  };
+  const i = finals.findIndex(f => f.id === id);
+  if (i >= 0) finals[i] = rec; else finals.push(rec);
+  persistFinals();
+  return rec;
+}
+
 export function editFinal(id, data) {
   const f = finals.find(x => x.id === id);
   if (!f) return null;

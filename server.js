@@ -275,6 +275,15 @@ app.delete("/api/finals", (req, res) => {
   if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
   scorewatch.clearAllFinals(); res.json({ ok: true });
 });
+// Commissioner: add a completed game to the Final board (gated by a simple key).
+app.get("/api/finals/add", (req, res) => {
+  if (req.query.key !== "gameday") return res.status(403).json({ error: "bad key" });
+  res.json(scorewatch.addFinal({
+    away: req.query.away, home: req.query.home,
+    awayScore: req.query.as, homeScore: req.query.hs,
+    coach: req.query.coach, team: req.query.team,
+  }));
+});
 app.post("/api/final/:id", (req, res) => {
   if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
   res.json(scorewatch.editFinal(req.params.id, req.body || {}) || {});
