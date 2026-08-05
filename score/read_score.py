@@ -34,7 +34,8 @@ DEFAULT_TEMPLATE = {
         "home":      [0.050, 0.945, 0.060, 0.045],
         "homeScore": [0.112, 0.945, 0.035, 0.045],
         "quarter":   [0.150, 0.905, 0.055, 0.045],
-        "clock":     [0.150, 0.945, 0.070, 0.045]
+        "clock":     [0.150, 0.945, 0.070, 0.045],
+        "downDistance": [0.150, 0.975, 0.120, 0.030]
     }
 }
 
@@ -83,6 +84,7 @@ WHITELIST = {
     "clock": "0123456789:OolIi",
     "alpha": "ABCDEFGHIJKLMNOPQRSTUVWXYZ ",
     "quarter": "0123456789STNDRDTHOTHALFIN",
+    "downdist": "0123456789STNDRDTHGOAL& ",
 }
 
 # common OCR confusions for glyph->digit on the EA scoreboard font
@@ -170,6 +172,64 @@ def norm_quarter(s):
     return None
 
 
+def norm_down_distance(s):
+    """Normalize a down-and-distance read like '2ND & 7' or '3RD & GOAL'."""
+    s = (s or "").upper().replace(" ", "")
+    # common glyph slips inside GOAL (G0AL / GDAL) and the ampersand dropping out
+    s = s.replace("G0AL", "GOAL").replace("GOA1", "GOAL")
+    m = re.search(r"([1-4])(ST|ND|RD|TH)&?(GOAL|\d{1,2})", s)
+    if not m:
+        return None
+    down = m.group(1) + m.group(2)
+    dist = m.group(3)
+    if dist != "GOAL":
+        n = int(dist)
+        if n < 1 or n > 99:
+            return None
+        dist = str(n)
+    return f"{down} & {dist}"
+
+
+# Down & distance is a short line under the clock; read it across several passes.
+def read_down_distance(cell):
+    if cell is None or cell.size == 0:
+        return None
+    img = prep(cell)
+    parts = []
+    for psm in (7, 6, 11):
+        cfg = f"--psm {psm} -c tessedit_char_whitelist=0123456789STNDRDTHGOAL&stndrdthgoal "
+        t = pytesseract.image_to_string(img, config=cfg).strip()
+        if t:
+            parts.append(t)
+    return norm_down_distance(" ".join(parts))
+
+
+def _marker_fraction(cell):
+    """Fraction of bright 'marker' pixels in a cell — used to sense a possession
+    icon (a small bright football/arrow) against the dark score bug."""
+    if cell is None or cell.size == 0:
+        return 0.0
+    g = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
+    _, th = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return float((th > 127).mean())
+
+
+def read_possession(img, fields):
+    """Best-effort possession from a bright marker beside each team.
+    Fails safe: returns None unless one side clearly carries a marker and the
+    other doesn't. The marker boxes MUST be calibrated against a real frame."""
+    if "possAway" not in fields or "possHome" not in fields:
+        return None
+    a = _marker_fraction(crop_frac(img, fields["possAway"]))
+    h = _marker_fraction(crop_frac(img, fields["possHome"]))
+    MIN, MARGIN = 0.12, 0.10
+    if a >= MIN and a - h >= MARGIN:
+        return "away"
+    if h >= MIN and h - a >= MARGIN:
+        return "home"
+    return None
+
+
 # Quarter is tiny; read it across several OCR passes and keep the first that parses.
 def read_quarter(cell):
     if cell is None or cell.size == 0:
@@ -197,6 +257,8 @@ def read(path, template):
     hsc, chs = ocr(crop_frac(img, f["homeScore"]), "digits")
     quarter, cq = read_quarter(crop_frac(img, f["quarter"]))
     clk, cc = ocr(crop_frac(img, f["clock"]), "clock")
+    down_distance = read_down_distance(crop_frac(img, f["downDistance"])) if "downDistance" in f else None
+    possession = read_possession(img, f)
 
     away_score = parse_int(asc)
     home_score = parse_int(hsc)
@@ -218,6 +280,8 @@ def read(path, template):
         "homeScore": home_score,
         "quarter": quarter,
         "clock": clock,
+        "downDistance": down_distance,
+        "possession": possession,
         "confidence": confidence,
     }
 
