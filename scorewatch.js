@@ -26,8 +26,16 @@ const CONCURRENCY = Number(process.env.SCORE_CONCURRENCY || 3);
 const MIN_CONF = Number(process.env.SCORE_MIN_CONFIDENCE || 0.22);
 const FRAME_TTL = Number(process.env.SCORE_STALE_SECONDS || 120) * 1000;
 // grab up to N frames per read so a replay/menu/blurry moment doesn't lose the score
-const GRAB_ATTEMPTS = Number(process.env.SCORE_GRAB_ATTEMPTS || 3);
-const GRAB_GAP_MS = Number(process.env.SCORE_GRAB_GAP_MS || 1200);
+// (stops early once a clean full read is found, so it's not always all N)
+const GRAB_ATTEMPTS = Number(process.env.SCORE_GRAB_ATTEMPTS || 6);
+const GRAB_GAP_MS = Number(process.env.SCORE_GRAB_GAP_MS || 1000);
+// don't archive to Final until a live stream has been missing this many checks
+// (Twitch occasionally omits a live channel for one cycle)
+const ARCHIVE_AFTER_MISSES = Number(process.env.SCORE_ARCHIVE_AFTER_MISSES || 2);
+
+const normPair = (a, b) =>
+  `${String(a || "").toLowerCase().replace(/[^a-z0-9]/g, "")}|${String(b || "").toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+let misses = {}; // login -> consecutive checks where a scored stream was not live
 
 // login -> { away, home, awayScore, homeScore, quarter, clock, confidence, source, updatedAt, coach, team, startedAt }
 let scores = {};
@@ -205,14 +213,32 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
     }));
   }
 
-  // a CONFIRMED dynasty stream that is no longer live = game over -> Final.
-  // unconfirmed reads (other dynasties) are discarded, never archived.
-  for (const login of Object.keys(scores)) {
-    if (!liveByLogin.has(login)) {
-      const sc = scores[login];
-      if (sc.dynastyConfirmed && (sc.awayScore != null || sc.homeScore != null)) archiveFinal(login, sc);
-      delete scores[login];
+  // Undo premature/false finals: if a game is live again with a score, it isn't
+  // final. Drop any final for the same stream OR the same team matchup.
+  const liveMatchups = new Set();
+  for (const login of liveByLogin.keys()) {
+    const sc = scores[login];
+    if (sc && (sc.awayScore != null || sc.homeScore != null)) {
+      liveMatchups.add(normPair(sc.away, sc.home));
+      liveMatchups.add(normPair(sc.home, sc.away)); // tolerate flipped home/away
     }
+  }
+  const before = finals.length;
+  finals = finals.filter(f =>
+    !liveByLogin.has(f.twitch) && !liveMatchups.has(normPair(f.away, f.home))
+  );
+  if (finals.length !== before) persistFinals();
+
+  // A CONFIRMED dynasty stream missing for a few checks = game over -> Final.
+  // One missed check is tolerated (transient Twitch drop) before archiving.
+  for (const login of Object.keys(scores)) {
+    if (liveByLogin.has(login)) { misses[login] = 0; continue; }
+    misses[login] = (misses[login] || 0) + 1;
+    if (misses[login] < ARCHIVE_AFTER_MISSES) continue;
+    const sc = scores[login];
+    if (sc.dynastyConfirmed && (sc.awayScore != null || sc.homeScore != null)) archiveFinal(login, sc);
+    delete scores[login];
+    delete misses[login];
   }
   persist();
 }
