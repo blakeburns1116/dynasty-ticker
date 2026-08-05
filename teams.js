@@ -56,8 +56,9 @@ export function matchesTeam(ocrText, teamName) {
   if (!o) return false;
   const aliases = (TEAM_ALIASES[teamName] || [teamName]).map(norm);
   if (aliases.some(a => a === o || (a.length >= 4 && o.includes(a)))) return true;
-  // fuzzy only against full names (>=8 chars) to avoid short-alias lookalikes
-  if (o.length >= 6 && aliases.some(a => a.length >= 8 && sim(o, a) >= 0.62)) return true;
+  // fuzzy only against full names (>=8 chars) AND only when the lengths are close,
+  // so a bare name never matches its "State" sibling (Washington vs Washington State).
+  if (o.length >= 6 && aliases.some(a => a.length >= 8 && Math.abs(o.length - a.length) <= 2 && !a.startsWith(o) && sim(o, a) >= 0.62)) return true;
   return false;
 }
 
@@ -98,7 +99,7 @@ export function resolveAny(ocrText) {
   for (const k of FBS_NAMES) if (k.length >= 5 && (o.includes(k) || k.includes(o))) return k;
   if (o.length >= 5) {
     let best = null, bs = 0, second = 0;
-    for (const k of FBS_NAMES) { if (k.length < 6) continue; const s = sim(o, k); if (s > bs) { second = bs; bs = s; best = k; } else if (s > second) second = s; }
+    for (const k of FBS_NAMES) { if (k.length < 6 || Math.abs(o.length - k.length) > 2 || k.startsWith(o)) continue; const s = sim(o, k); if (s > bs) { second = bs; bs = s; best = k; } else if (s > second) second = s; }
     if (best && bs >= 0.6 && (bs - second) >= 0.08) return best;
   }
   return null;
@@ -121,7 +122,7 @@ export function resolveTeam(ocrText) {
     let best = null, bs = 0;
     for (const name of Object.keys(TEAM_ALIASES)) {
       for (const a of (TEAM_ALIASES[name] || [name]).map(norm)) {
-        if (a.length < 8) continue;
+        if (a.length < 8 || Math.abs(o.length - a.length) > 2 || a.startsWith(o)) continue;
         const s = sim(o, a);
         if (s > bs) { bs = s; best = name; }
       }
