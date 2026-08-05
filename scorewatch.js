@@ -186,7 +186,9 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
     await Promise.all(batch.map(async login => {
       try {
         const r = await readOne(login, frameFor ? frameFor(login) : null);
-        if (r.ok && (r.confidence ?? 0) >= MIN_CONF) {
+        // accept if both scores clearly read (strong validity), or confidence clears the bar
+        const bothScores = r.ok && r.awayScore != null && r.homeScore != null;
+        if (r.ok && (bothScores || (r.confidence ?? 0) >= MIN_CONF)) {
           const st = liveByLogin.get(login) || {};
           // sticky: once a read shows their team, stay confirmed for the session
           const confirmed = scores[login]?.dynastyConfirmed || scoreConfirmsTeam(r, st.team);

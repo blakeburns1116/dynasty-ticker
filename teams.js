@@ -34,15 +34,30 @@ export const TEAM_ALIASES = {
 // lowercase, drop punctuation AND spaces so "BALLSTATE" matches "ball state"
 const norm = s => (s || "").toString().toLowerCase().replace(/[^a-z0-9]/g, "");
 
+// Levenshtein distance + similarity ratio, to tolerate OCR garble like
+// "EASTCARGL" for "east carolina" without matching genuinely different teams.
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[m][n];
+}
+const sim = (a, b) => { const L = Math.max(a.length, b.length); return L ? 1 - lev(a, b) / L : 0; };
+
 // Does an OCR'd team string refer to `teamName`?
-// Match only when the OCR text EQUALS an alias, or CONTAINS a full alias (>=4 chars).
-// We never match on the alias containing a fragment of the OCR text — that caused
-// false hits like "Florida" matching "Florida International", or "Tulsa"/"Tulane".
+// Exact / full-alias-contained, then a fuzzy fallback (>=0.62 similar) for garbled
+// reads. Threshold tuned so lookalikes stay apart (e.g. Texas State vs Texas A&M).
 export function matchesTeam(ocrText, teamName) {
   const o = norm(ocrText);
   if (!o) return false;
   const aliases = (TEAM_ALIASES[teamName] || [teamName]).map(norm);
-  return aliases.some(a => a === o || (a.length >= 4 && o.includes(a)));
+  if (aliases.some(a => a === o || (a.length >= 4 && o.includes(a)))) return true;
+  // fuzzy only against full names (>=8 chars) to avoid short-alias lookalikes
+  if (o.length >= 6 && aliases.some(a => a.length >= 8 && sim(o, a) >= 0.62)) return true;
+  return false;
 }
 
 // Confirm a scoreboard read belongs to a coach's dynasty team.
