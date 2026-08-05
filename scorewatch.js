@@ -44,7 +44,7 @@ let finals = [];
 let storePath = path.join(__dirname, "scores.json");
 let finalsPath = path.join(__dirname, "finals.json");
 
-const FINAL_WINDOW_HRS = Number(process.env.SCORE_FINAL_HOURS || 24);
+const FINAL_WINDOW_HRS = Number(process.env.SCORE_FINAL_HOURS || 48);
 
 export function initStore(dataDir) {
   storePath = path.join(dataDir, "scores.json");
@@ -101,6 +101,12 @@ export function editFinal(id, data) {
 
 export function removeFinal(id) {
   finals = finals.filter(f => f.id !== id);
+  persistFinals();
+}
+
+// Commissioner action: wipe all finals (e.g. rolling to a new week).
+export function clearAllFinals() {
+  finals = [];
   persistFinals();
 }
 

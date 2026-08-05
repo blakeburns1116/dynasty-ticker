@@ -253,6 +253,11 @@ const pwOK = req => (req.body && req.body.password === SUBMIT_PW) || req.get("x-
 
 // Completed games (auto-archived when a stream ends).
 app.get("/api/finals", (_req, res) => res.json({ finals: scorewatch.getFinals() }));
+// Commissioner: clear ALL finals (rolling to a new week). Password-protected.
+app.delete("/api/finals", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  scorewatch.clearAllFinals(); res.json({ ok: true });
+});
 app.post("/api/final/:id", (req, res) => {
   if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
   res.json(scorewatch.editFinal(req.params.id, req.body || {}) || {});
