@@ -53,6 +53,7 @@ let alertState = {};
 const normPair = (a, b) =>
   `${String(a || "").toLowerCase().replace(/[^a-z0-9]/g, "")}|${String(b || "").toLowerCase().replace(/[^a-z0-9]/g, "")}`;
 let misses = {}; // login -> consecutive checks where a scored stream was not live
+let lastRead = {}; // login -> last RAW ocr {away,home}, to confirm a real score correction
 
 // login -> { away, home, awayScore, homeScore, quarter, clock, confidence, source, updatedAt, coach, team, startedAt }
 let scores = {};
@@ -368,12 +369,19 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
           // end-of-game camera reads: a lower/blank read keeps the prior value.
           // Quarter is sticky and only advances (1st->2nd->3rd->4th->OT), so once
           // it's captured it stays accurate even on frames where it doesn't read.
+          const lr = lastRead[login] || {};
           let a = r.awayScore, h = r.homeScore, q = r.quarter;
           if (prev && prev.startedAt === (st.startedAt || null)) {
-            if (a == null || (prev.awayScore != null && a < prev.awayScore)) a = prev.awayScore;
-            if (h == null || (prev.homeScore != null && h < prev.homeScore)) h = prev.homeScore;
+            // Scores don't drop on a single frame (guards a bad end-of-play read),
+            // BUT a lower value read on TWO consecutive checks is a genuine
+            // correction of an earlier misread, so let it through.
+            if (a == null) a = prev.awayScore;
+            else if (prev.awayScore != null && a < prev.awayScore && a !== lr.away) a = prev.awayScore;
+            if (h == null) h = prev.homeScore;
+            else if (prev.homeScore != null && h < prev.homeScore && h !== lr.home) h = prev.homeScore;
             if (!q || (QRANK[q] || 0) < (QRANK[prev.quarter] || 0)) q = prev.quarter;
           }
+          lastRead[login] = { away: r.awayScore, home: r.homeScore };
           scores[login] = {
             ...r, awayScore: a, homeScore: h, quarter: q,
             source: "cv", updatedAt: new Date().toISOString(),

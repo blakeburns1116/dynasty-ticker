@@ -208,6 +208,13 @@ function mockStreams(logins) {
 // ---------- web server ----------
 const app = express();
 app.use(express.json());
+// Live data must never be cached by the browser or any edge/proxy, or viewers
+// (and the app's 20s refresh) can show a stale score.
+app.use("/api", (_req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.set("Pragma", "no-cache");
+  next();
+});
 app.use(express.static(path.join(__dirname, "public")));
 
 // Live board.
