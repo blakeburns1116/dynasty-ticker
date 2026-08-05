@@ -474,11 +474,15 @@ function card(s){
   </div>`;
 }
 
+// Title-case a raw OCR name so a non-roster opponent ("MICHIGAN") shows as a
+// clean full name ("Michigan"), matching how roster teams render.
+const titleCase = s => (s||"").toString().toLowerCase().replace(/\b[a-z]/g, m => m.toUpperCase());
 function teamRow(abbr, tcol, score, lead, poss){
   const name = nameFromAbbr(abbr);
   const col  = name ? TEAMS[name] : DEFT;
-  const chip = name ? col.a : (normT(abbr).slice(0,4).toUpperCase() || "—");
-  const display = name || abbr || "Team";
+  const raw  = (abbr||"").toString().trim();
+  const chip = name ? col.a : (normT(raw).slice(0,4).toUpperCase() || "—");
+  const display = name || titleCase(raw) || "Team";
   const ball = poss ? ' <span class="poss" title="Has the ball">🏈</span>' : '';
   return `<div class="team ${lead?'lead':(score!=null?'trail':'')}">
     <div class="logo" style="background:${col.c};color:${col.t}">${esc(chip)}</div>
