@@ -16,6 +16,7 @@ export const TEAM_ALIASES = {
   "JMU":                  ["james madison", "jmu"],
   "Liberty":              ["liberty", "lib"],
   "Louisiana":            ["louisiana", "ragin cajuns", "lafayette", "ull"],
+  "Miami (OH)":           ["miami oh", "miami ohio", "miamioh", "redhawks", "moh"],
   "Rice":                 ["rice"],
   "Sacramento State":     ["sacramento state", "sac state", "sacst", "sacramento"],
   "San Jose State":       ["san jose state", "san jose", "sjsu"],
