@@ -237,10 +237,53 @@ async function renderLive(){
     return;
   }
   const sorted=[...streams].sort((a,b)=>(b.onDynasty-a.onDynasty)||((b.score?1:0)-(a.score?1:0))||(b.viewers-a.viewers));
+  // group the two streams of a head-to-head into one card
+  const groups={}, order=[];
+  for(const s of sorted){ const k=gameKey(s)||("solo:"+s.twitch); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(s); }
+  const html = order.map(k=> groups[k].length>=2 ? mergedCard(groups[k]) : card(groups[k][0])).join("");
+  const games = order.length;
   $("#live").innerHTML =
-    `<p class="section-note">${onD.length} playing the dynasty</p>`
-    + `<div class="grid">${sorted.map(card).join("")}</div>`;
+    `<p class="section-note">${onD.length} playing the dynasty${games!==onD.length? ` · ${games} game${games!==1?'s':''}`:""}</p>`
+    + `<div class="grid">${html}</div>`;
   flashChanges(sorted);
+}
+
+// A stable key for a game so two coaches in the same matchup group together.
+function gameKey(s){
+  const sc=s.score; if(!sc || !sc.away || !sc.home) return null;
+  const a=nameFromAbbr(sc.away)||sc.away, b=nameFromAbbr(sc.home)||sc.home;
+  return [normT(a),normT(b)].sort().join("|");
+}
+const liveQuality = s => { const sc=s.score; if(!sc) return -1;
+  return (sc.confidence||0) + (sc.awayScore!=null?0.6:0) + (sc.homeScore!=null?0.6:0); };
+
+// One card for a head-to-head, showing the game once with a Watch button per stream.
+function mergedCard(group){
+  const best = group.slice().sort((a,b)=>liveQuality(b)-liveQuality(a))[0];
+  const sc = best.score;
+  const awayT = teamOf(nameFromAbbr(sc.away)||""), homeT = teamOf(nameFromAbbr(sc.home)||"");
+  const aLead=(sc.awayScore??0)>(sc.homeScore??0), hLead=(sc.homeScore??0)>(sc.awayScore??0);
+  const srcCls = sc.stale?"src stale":(sc.source==="manual"?"src manual":"src");
+  const srcTxt = sc.stale?"reading stale":(sc.source==="manual"?"entered":"auto");
+  const stat = [sc.quarter?`<span class="q">${esc(sc.quarter)}</span>`:"", sc.clock?`<span class="clk">${esc(sc.clock)}</span>`:""].filter(Boolean).join(" · ") || "LIVE";
+  const watches = group.map(s=>`<a class="watch" href="${s.url}" target="_blank">▶ ${esc(s.coach)}</a>`).join("");
+  const totalViewers = group.reduce((n,s)=>n+(s.viewers||0),0);
+  return `<div class="game" data-twitch="${esc(best.twitch)}">
+    <div class="stripe" style="background:linear-gradient(90deg,${awayT.c} 50%, ${homeT.c} 50%)"></div>
+    <div class="top"><span class="badge-live"><span class="d"></span>LIVE</span>
+      <span style="font-size:11px;color:var(--muted);font-weight:700;margin-left:6px">HEAD-TO-HEAD</span>
+      <span class="eyes">👁 ${totalViewers}</span></div>
+    <div class="rows">
+      ${teamRow(sc.away, awayT, sc.awayScore, aLead)}
+      ${teamRow(sc.home, homeT, sc.homeScore, hLead)}
+    </div>
+    <div class="status">${stat}<span class="${srcCls}">${srcTxt}</span></div>
+    <div class="foot"><span class="who">${group.map(s=>esc(s.coach)).join(" vs ")} · both live</span>
+      <div class="btns">
+        <button class="edit" onclick="editScore('${esc(best.twitch)}','${esc(best.coach)}')">✎</button>
+        ${watches}
+      </div></div>
+  </div>`;
 }
 
 // ---- score-change red flash + alert sound ----
