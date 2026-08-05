@@ -280,18 +280,30 @@ function card(s){
 }
 
 function teamRow(abbr, tcol, score, lead){
-  const r = recFor(abbr);
-  const rank = r&&r.rank ? `<span class="rank">#${r.rank}</span>` : "";
-  const rec  = r&&r.record ? `<div class="tsub"><span class="rec">${esc(r.record)}</span></div>` : "";
+  const name = nameFromAbbr(abbr);
+  const col  = name ? TEAMS[name] : DEFT;
+  const chip = name ? col.a : (normT(abbr).slice(0,4).toUpperCase() || "—");
+  const display = name || abbr || "Team";
   return `<div class="team ${lead?'lead':(score!=null?'trail':'')}">
-    <div class="logo" style="background:${tcol.c};color:${tcol.t}">${esc(abbr||tcol.a)}</div>
-    <div><div class="tname">${rank}${esc(fullFromAbbr(abbr)||abbr||"Team")}</div>${rec}</div>
+    <div class="logo" style="background:${col.c};color:${col.t}">${esc(chip)}</div>
+    <div><div class="tname">${esc(display)}</div></div>
     <div class="score">${score==null?"–":score}</div>
   </div>`;
 }
-// map an OCR abbreviation back to a roster team name / colors when possible
-function nameFromAbbr(ab){ if(!ab) return null; ab=ab.toUpperCase();
-  for(const [name,v] of Object.entries(TEAMS)) if(v.a===ab) return name; return null; }
+// normalize an OCR/team string: lowercase, letters+digits only
+const normT = s => (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,"");
+// map an OCR'd team string back to a roster team name (fuzzy, space-insensitive)
+function nameFromAbbr(ab){
+  const o = normT(ab);
+  if(!o) return null;
+  for(const [name,v] of Object.entries(TEAMS)){
+    const n = normT(name), a = normT(v.a);
+    if(o===n || o===a) return name;
+    if(n.length>=4 && o.includes(n)) return name;
+    if(a.length>=4 && o.includes(a)) return name;
+  }
+  return null;
+}
 function fullFromAbbr(ab){ return nameFromAbbr(ab); }
 
 // ---------- FINAL (completed games) ----------
