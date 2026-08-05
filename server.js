@@ -215,7 +215,12 @@ app.use("/api", (_req, res, next) => {
   res.set("Pragma", "no-cache");
   next();
 });
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res, filePath) => {
+    // always revalidate the app page so a new deploy shows without a hard refresh
+    if (filePath.endsWith(".html")) res.set("Cache-Control", "no-cache, must-revalidate");
+  }
+}));
 
 // Live board.
 // Default (loose): show a roster coach's College Football stream, and hide it

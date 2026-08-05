@@ -67,6 +67,43 @@ export function scoreConfirmsTeam(score, teamName) {
   return matchesTeam(score.away, teamName) || matchesTeam(score.home, teamName);
 }
 
+// Every other FBS school (normalized), so the server can tell when an OCR'd name
+// is a real, "certified" school and lock it in. Mirrors the color map in the UI.
+const FBS_NAMES = [
+  "alabama","arkansas","auburn","florida","georgia","kentucky","lsu","mississippistate",
+  "missouri","oklahoma","olemiss","mississippi","southcarolina","tennessee","texas","texasam",
+  "vanderbilt","illinois","indiana","iowa","maryland","michigan","michiganstate","minnesota",
+  "nebraska","northwestern","ohiostate","oregon","pennstate","purdue","rutgers","ucla","usc",
+  "washington","wisconsin","arizona","arizonastate","baylor","byu","cincinnati","colorado",
+  "houston","iowastate","kansas","kansasstate","oklahomastate","tcu","texastech","ucf","utah",
+  "westvirginia","bostoncollege","california","clemson","duke","floridastate","georgiatech",
+  "louisville","miami","ncstate","northcarolina","pittsburgh","smu","stanford","syracuse",
+  "virginia","virginiatech","wakeforest","notredame","uconn","umass","army","navy","airforce",
+  "boisestate","memphis","southflorida","northtexas","utep","uab","charlotte","marshall",
+  "olddominion","westernkentucky","middletennessee","newmexicostate","samhouston","kennesawstate",
+  "georgiastate","southalabama","troy","arkansasstate","ulmonroe","akron","bowlinggreen","buffalo",
+  "centralmichigan","easternmichigan","kentstate","northernillinois","ohio","westernmichigan",
+  "nevada","unlv","newmexico","sandiegostate","hawaii","oregonstate",
+];
+
+// Is an OCR'd team string a real, recognizable school (roster OR any FBS team)?
+// Returns a canonical-ish key when recognized, else null. Used to LOCK a team
+// name once it's verified so later garbled reads can't overwrite it.
+export function resolveAny(ocrText) {
+  const roster = resolveTeam(ocrText);
+  if (roster) return roster;
+  const o = norm(ocrText);
+  if (!o) return null;
+  if (FBS_NAMES.includes(o)) return o;
+  for (const k of FBS_NAMES) if (k.length >= 5 && (o.includes(k) || k.includes(o))) return k;
+  if (o.length >= 5) {
+    let best = null, bs = 0, second = 0;
+    for (const k of FBS_NAMES) { if (k.length < 6) continue; const s = sim(o, k); if (s > bs) { second = bs; bs = s; best = k; } else if (s > second) second = s; }
+    if (best && bs >= 0.6 && (bs - second) >= 0.08) return best;
+  }
+  return null;
+}
+
 // Map an OCR'd team string to its canonical roster name (or null). Lets the
 // server build ONE stable matchup key for a head-to-head even when the two
 // coaches' streams OCR the names slightly differently.

@@ -14,7 +14,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { scoreConfirmsTeam, resolveTeam } from "./teams.js";
+import { scoreConfirmsTeam, resolveTeam, resolveAny } from "./teams.js";
 
 const execFileP = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -185,24 +185,70 @@ function readQuality(r) {
 const goodEnough = r =>
   r && r.ok && r.awayScore != null && r.homeScore != null && (r.confidence || 0) >= MIN_CONF;
 
-// Read one stream: grab up to GRAB_ATTEMPTS frames and keep the best read, so a
-// replay/menu/blurry moment on the first grab doesn't lose the score.
+// Most common non-empty value across frames, with its vote count.
+function modeOf(vals) {
+  const m = new Map(); let seen = 0;
+  for (const v of vals) { if (v == null || v === "") continue; seen++; m.set(v, (m.get(v) || 0) + 1); }
+  let best = null, bc = 0;
+  for (const [v, c] of m) if (c > bc) { bc = c; best = v; }
+  return { val: best, count: bc, seen };
+}
+// Team string: most common, tie-broken toward the longer (less-truncated) read.
+function bestTeamName(vals) {
+  const nn = vals.filter(v => v);
+  if (!nn.length) return null;
+  const m = new Map();
+  for (const v of nn) m.set(v, (m.get(v) || 0) + 1);
+  let best = null, bc = 0;
+  for (const [v, c] of m) if (c > bc || (c === bc && best && v.length > best.length)) { bc = c; best = v; }
+  return best;
+}
+// Fuse several frame reads into one consensus reading. Each field is decided by a
+// vote across frames, so a single garbled frame can't move a score. Scores must
+// appear in >=2 frames (when we have >=3) to be trusted at all.
+function consensus(reads) {
+  const ok = reads.filter(r => r && r.ok);
+  if (!ok.length) return { ok: false };
+  const aS = modeOf(ok.map(r => r.awayScore));
+  const hS = modeOf(ok.map(r => r.homeScore));
+  const q = modeOf(ok.map(r => r.quarter));
+  const clk = modeOf(ok.map(r => r.clock));
+  const dd = modeOf(ok.map(r => r.downDistance));
+  const poss = modeOf(ok.map(r => r.possession));
+  const trust = m => (ok.length >= 3 && m.count < 2) ? null : m.val;
+  const agree = ((aS.count || 0) + (hS.count || 0)) / (2 * Math.max(1, ok.length));
+  const rawConf = Math.max(0, ...ok.map(r => r.confidence || 0));
+  return {
+    ok: true,
+    away: bestTeamName(ok.map(r => r.away)),
+    home: bestTeamName(ok.map(r => r.home)),
+    awayScore: trust(aS) ?? null,
+    homeScore: trust(hS) ?? null,
+    quarter: q.val ?? null,
+    clock: clk.val ?? null,
+    downDistance: dd.val ?? null,
+    possession: poss.val ?? null,
+    confidence: Math.max(agree, rawConf),
+    frames: ok.length,
+  };
+}
+
+// Read one stream: grab GRAB_ATTEMPTS frames spread over a few seconds and return
+// the consensus across them, so a replay/menu/blurry/garbled frame is outvoted.
 // `frameOverride` lets tests skip grab.sh and read a fixed frame once.
 async function readOne(login, frameOverride) {
   if (frameOverride) return readFrame(frameOverride);
   const frame = path.join(os.tmpdir(), `frame_${login}.jpg`);
-  let best = { ok: false }, bestQ = -1;
+  const reads = [];
   for (let i = 0; i < GRAB_ATTEMPTS; i++) {
     try {
       await execFileP("bash", [path.join(SCORE_DIR, "grab.sh"), login, frame], { timeout: 30000 });
       const r = await readFrame(frame);
-      const q = readQuality(r);
-      if (q > bestQ) { best = r; bestQ = q; }
-      if (goodEnough(r)) break;                 // stop early on a clean full read
+      if (r && r.ok) reads.push(r);
     } catch (e) { /* try the next frame */ }
     if (i < GRAB_ATTEMPTS - 1) await new Promise(res => setTimeout(res, GRAB_GAP_MS));
   }
-  return best;
+  return consensus(reads);
 }
 
 // ---- close-game Discord ping (server-side, fires once per game) ----
@@ -369,21 +415,21 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
           // end-of-game camera reads: a lower/blank read keeps the prior value.
           // Quarter is sticky and only advances (1st->2nd->3rd->4th->OT), so once
           // it's captured it stays accurate even on frames where it doesn't read.
-          const lr = lastRead[login] || {};
           let a = r.awayScore, h = r.homeScore, q = r.quarter;
+          let away = r.away, home = r.home;
           if (prev && prev.startedAt === (st.startedAt || null)) {
-            // Scores don't drop on a single frame (guards a bad end-of-play read),
-            // BUT a lower value read on TWO consecutive checks is a genuine
-            // correction of an earlier misread, so let it through.
-            if (a == null) a = prev.awayScore;
-            else if (prev.awayScore != null && a < prev.awayScore && a !== lr.away) a = prev.awayScore;
-            if (h == null) h = prev.homeScore;
-            else if (prev.homeScore != null && h < prev.homeScore && h !== lr.home) h = prev.homeScore;
+            // Scores only ever climb within a game, so a lower/blank read is a
+            // misread (e.g. "21" clipped to "1") — keep the prior value.
+            if (a == null || (prev.awayScore != null && a < prev.awayScore)) a = prev.awayScore;
+            if (h == null || (prev.homeScore != null && h < prev.homeScore)) h = prev.homeScore;
             if (!q || (QRANK[q] || 0) < (QRANK[prev.quarter] || 0)) q = prev.quarter;
+            // Once a team name is verified as a real school, LOCK it for the rest
+            // of the game — later garbled reads can't overwrite "Stanford" etc.
+            if (resolveAny(prev.away)) away = prev.away;
+            if (resolveAny(prev.home)) home = prev.home;
           }
-          lastRead[login] = { away: r.awayScore, home: r.homeScore };
           scores[login] = {
-            ...r, awayScore: a, homeScore: h, quarter: q,
+            ...r, away, home, awayScore: a, homeScore: h, quarter: q,
             source: "cv", updatedAt: new Date().toISOString(),
             coach: st.coach || null, team: st.team || null, startedAt: st.startedAt || null,
             dynastyConfirmed: !!confirmed,
