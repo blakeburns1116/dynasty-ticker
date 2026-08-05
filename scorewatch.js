@@ -33,6 +33,7 @@ const GRAB_GAP_MS = Number(process.env.SCORE_GRAB_GAP_MS || 1000);
 // (Twitch occasionally omits a live channel for one cycle)
 const ARCHIVE_AFTER_MISSES = Number(process.env.SCORE_ARCHIVE_AFTER_MISSES || 2);
 
+const QRANK = { "1ST": 1, "2ND": 2, "HALF": 2.5, "3RD": 3, "4TH": 4, "OT": 5, "FINAL": 6 };
 const normPair = (a, b) =>
   `${String(a || "").toLowerCase().replace(/[^a-z0-9]/g, "")}|${String(b || "").toLowerCase().replace(/[^a-z0-9]/g, "")}`;
 let misses = {}; // login -> consecutive checks where a scored stream was not live
@@ -209,13 +210,16 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
           const confirmed = prev?.dynastyConfirmed || scoreConfirmsTeam(r, st.team);
           // Scores never go backwards within a game. Guards against garbage
           // end-of-game camera reads: a lower/blank read keeps the prior value.
-          let a = r.awayScore, h = r.homeScore;
+          // Quarter is sticky and only advances (1st->2nd->3rd->4th->OT), so once
+          // it's captured it stays accurate even on frames where it doesn't read.
+          let a = r.awayScore, h = r.homeScore, q = r.quarter;
           if (prev && prev.startedAt === (st.startedAt || null)) {
             if (a == null || (prev.awayScore != null && a < prev.awayScore)) a = prev.awayScore;
             if (h == null || (prev.homeScore != null && h < prev.homeScore)) h = prev.homeScore;
+            if (!q || (QRANK[q] || 0) < (QRANK[prev.quarter] || 0)) q = prev.quarter;
           }
           scores[login] = {
-            ...r, awayScore: a, homeScore: h,
+            ...r, awayScore: a, homeScore: h, quarter: q,
             source: "cv", updatedAt: new Date().toISOString(),
             coach: st.coach || null, team: st.team || null, startedAt: st.startedAt || null,
             dynastyConfirmed: !!confirmed,
