@@ -81,7 +81,7 @@ WHITELIST = {
     # in parse_int (O->0 is very common for a lone zero score).
     "digits": "0123456789OolIiSB",
     "clock": "0123456789:OolIi",
-    "alpha": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "alpha": "ABCDEFGHIJKLMNOPQRSTUVWXYZ ",
     "quarter": "0123456789STNDRDTHOTHALFIN",
 }
 
@@ -117,12 +117,12 @@ def ocr(cell, kind):
     if cell is None or cell.size == 0:
         return "", 0.0
     img = prep(cell)
-    best_text, best_conf = "", 0.0
+    best_text, best_conf = "", -1.0  # -1 so a correct read reported at conf 0 is still kept
     for psm in (7, 8, 6):
         text, conf = _ocr_once(img, kind, psm)
         if text and conf > best_conf:
             best_text, best_conf = text, conf
-    return best_text, best_conf
+    return best_text, max(best_conf, 0.0)
 
 
 def parse_int(s):
