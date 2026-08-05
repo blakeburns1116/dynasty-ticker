@@ -173,21 +173,27 @@ def norm_quarter(s):
 
 
 def norm_down_distance(s):
-    """Normalize a down-and-distance read like '2ND & 7' or '3RD & GOAL'."""
+    """Normalize a down-and-distance read like '2ND & 7' or '3RD & GOAL'.
+    Tolerates the very common '1'->'l/I/|' and '0'->'O' OCR slips."""
     s = (s or "").upper().replace(" ", "")
-    # common glyph slips inside GOAL (G0AL / GDAL) and the ampersand dropping out
     s = s.replace("G0AL", "GOAL").replace("GOA1", "GOAL")
-    m = re.search(r"([1-4])(ST|ND|RD|TH)&?(GOAL|\d{1,2})", s)
+    m = re.search(r"([1-4LI|])(ST|ND|RD|TH)&?(GOAL|[0-9OLI]{1,2})", s)
     if not m:
         return None
-    down = m.group(1) + m.group(2)
+    dmap = {"L": "1", "I": "1", "|": "1", "O": "0"}
+    down = dmap.get(m.group(1), m.group(1))
+    if down not in "1234":
+        return None
     dist = m.group(3)
     if dist != "GOAL":
+        dist = "".join(dmap.get(c, c) for c in dist)
+        if not dist.isdigit():
+            return None
         n = int(dist)
         if n < 1 or n > 99:
             return None
         dist = str(n)
-    return f"{down} & {dist}"
+    return f"{down}{m.group(2)} & {dist}"
 
 
 # Down & distance is a short line under the clock; read it across several passes.
@@ -230,6 +236,20 @@ def read_possession(img, fields):
     return None
 
 
+# The big bold clock ("2:25") reads cleanly only under some page-seg modes
+# (psm 13 in particular); the shared ocr() modes miss it, so read it on its own.
+def read_clock(cell):
+    if cell is None or cell.size == 0:
+        return None, 0.0
+    img = prep(cell)
+    for psm in (13, 7, 6, 8):
+        t = pytesseract.image_to_string(img, config=f"--psm {psm} -c tessedit_char_whitelist=0123456789:OolIi").strip()
+        c = norm_clock(t)
+        if c:
+            return c, 0.6
+    return None, 0.0
+
+
 # Quarter is tiny; read it across several OCR passes and keep the first that parses.
 def read_quarter(cell):
     if cell is None or cell.size == 0:
@@ -256,13 +276,12 @@ def read(path, template):
     asc, cas = ocr(crop_frac(img, f["awayScore"]), "digits")
     hsc, chs = ocr(crop_frac(img, f["homeScore"]), "digits")
     quarter, cq = read_quarter(crop_frac(img, f["quarter"]))
-    clk, cc = ocr(crop_frac(img, f["clock"]), "clock")
+    clock, cc = read_clock(crop_frac(img, f["clock"]))
     down_distance = read_down_distance(crop_frac(img, f["downDistance"])) if "downDistance" in f else None
     possession = read_possession(img, f)
 
     away_score = parse_int(asc)
     home_score = parse_int(hsc)
-    clock = norm_clock(clk)
 
     # Gameplay sanity gate: a real score bug shows a clock AND at least one score.
     # If neither reads, we're almost certainly not looking at live gameplay.

@@ -1,14 +1,12 @@
 {
-  "note": "Calibrated against a REAL live 1920x1080 dynasty stream frame (grab.sh output): Ball State 42 vs Liberty 35. Centered horizontal EA score bug at the bottom. Fields are [x,y,w,h] as fractions of the frame. Team-name boxes exclude the small W-L record line; clock box excludes the down-and-distance line. downDistance/possAway/possHome are ESTIMATES layered under/beside the calibrated fields and should be fine-tuned against a live frame that shows a down & distance line and a possession marker.",
+  "note": "Calibrated against a REAL live 1920x1080 dynasty stream frame (bcburns16 / FIU vs Fresno State). Centered horizontal EA score bug: away name, away-score circle, center stack (quarter '1st' top-left, clock '2:25' middle, down&distance '1st & 10' bottom red banner), home-score circle, home name. Fields are [x,y,w,h] as fractions of the frame. Team-name boxes exclude the mascot subline. Possession is intentionally omitted until a live-snap frame with a visible possession marker is available (prevents false reads).",
   "fields": {
-    "away":      [0.298, 0.883, 0.092, 0.033],
-    "awayScore": [0.390, 0.876, 0.042, 0.058],
-    "quarter":   [0.444, 0.882, 0.030, 0.032],
-    "clock":     [0.479, 0.881, 0.050, 0.033],
-    "homeScore": [0.564, 0.876, 0.042, 0.058],
-    "home":      [0.626, 0.883, 0.080, 0.033],
-    "downDistance": [0.430, 0.917, 0.150, 0.028],
-    "possAway":  [0.283, 0.884, 0.014, 0.030],
-    "possHome":  [0.708, 0.884, 0.014, 0.030]
+    "away":         [0.278, 0.880, 0.100, 0.026],
+    "awayScore":    [0.396, 0.876, 0.030, 0.050],
+    "quarter":      [0.443, 0.882, 0.024, 0.028],
+    "clock":        [0.476, 0.878, 0.052, 0.036],
+    "downDistance": [0.472, 0.910, 0.064, 0.026],
+    "homeScore":    [0.570, 0.876, 0.030, 0.050],
+    "home":         [0.632, 0.880, 0.052, 0.026]
   }
 }
