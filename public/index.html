@@ -632,7 +632,7 @@ function nameFromAbbr(ab){
   }
   if(o.length>=6){
     let best=null, bs=0;
-    for(const name of Object.keys(TEAMS)){ const nn=normT(name); if(nn.length<8) continue; const s=sim(o,nn); if(s>bs){bs=s;best=name;} }
+    for(const name of Object.keys(TEAMS)){ const nn=normT(name); if(nn.length<8 || Math.abs(o.length-nn.length)>2 || nn.startsWith(o)) continue; const s=sim(o,nn); if(s>bs){bs=s;best=name;} }
     if(bs>=0.62) return best;
   }
   return null;
@@ -646,7 +646,7 @@ function resolveOpp(ab){
   if(OPP[o]) return OPP[o];
   if(OPP_ALIAS[o]) return OPP[OPP_ALIAS[o]];
   for(const k in OPP){ if(k.length>=5 && (o.includes(k)||k.includes(o))) return OPP[k]; }
-  if(o.length>=5){ let best=null,bs=0,second=0; for(const k in OPP){ if(k.length<6) continue; const s=sim(o,k); if(s>bs){second=bs;bs=s;best=OPP[k];} else if(s>second){second=s;} } if(best && bs>=0.6 && (bs-second)>=0.08) return best; }
+  if(o.length>=5){ let best=null,bs=0,second=0; for(const k in OPP){ if(k.length<6 || Math.abs(o.length-k.length)>2 || k.startsWith(o)) continue; const s=sim(o,k); if(s>bs){second=bs;bs=s;best=OPP[k];} else if(s>second){second=s;} } if(best && bs>=0.6 && (bs-second)>=0.08) return best; }
   return null;
 }
 // color entry for any team string: roster team, else FBS opponent, else neutral.
