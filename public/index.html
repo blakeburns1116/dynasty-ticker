@@ -87,9 +87,29 @@
     background:var(--chip); font-size:13px; font-weight:700; color:var(--ink); }
   .status .q { color:var(--live); }
   .status .clk { font-variant-numeric:tabular-nums; }
+  .status .dd { color:var(--ink); background:#e6ebf5; padding:1px 7px; border-radius:6px; font-size:12px; }
   .status .src { margin-left:auto; font-size:11px; font-weight:600; color:var(--muted); }
   .status .src.manual { color:var(--good); }
   .status .src.stale { color:var(--warn); }
+  .poss { font-size:13px; margin-left:5px; vertical-align:1px; }
+
+  /* red zone (goal-to-go) treatment */
+  .rz-badge { background:var(--live); color:#fff; font-size:10px; font-weight:800; letter-spacing:.4px;
+    padding:3px 7px; border-radius:6px; }
+  .game.redzone { border-color:var(--live); box-shadow:0 0 0 2px rgba(225,29,72,.35), var(--shadow); }
+  .game.redzone .status { background:#fdecef; }
+
+  /* alert toasts (halftime, 4th qtr, 2-min, close game) */
+  #toasts { position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:50;
+    display:flex; flex-direction:column; gap:8px; align-items:center; width:calc(100% - 24px); max-width:420px; }
+  .toast { background:#0e1526; color:#fff; border-radius:12px; padding:11px 16px; box-shadow:0 10px 30px rgba(9,14,30,.35);
+    display:flex; align-items:center; gap:10px; width:100%; animation:toastin .28s ease-out; border:1px solid rgba(255,255,255,.12); }
+  .toast.close { background:linear-gradient(92deg,#e11d48,#b91c1c); }
+  .toast .tt { font-weight:800; font-size:14px; }
+  .toast .ts { color:#cdd8ee; font-size:12px; font-weight:600; }
+  .toast.close .ts { color:#ffe4e6; }
+  @keyframes toastin { from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:translateY(0);} }
+  .toast.fade { opacity:0; transition:opacity .5s ease; }
 
   /* single-stream (no score) body */
   .solo { padding:12px 14px 4px; }
@@ -146,6 +166,7 @@
 </style>
 </head>
 <body>
+<div id="toasts"></div>
 <div class="wrap">
   <header>
     <div class="brand">
@@ -219,6 +240,25 @@ const fmtAgo = iso => {
 };
 const liveLen = iso => { if(!iso) return ""; const m=Math.round((Date.now()-new Date(iso))/60000);
   return m<60? m+"m": Math.floor(m/60)+"h "+(m%60)+"m"; };
+// fine-grained freshness for the per-card "reading age" stamp
+const fmtFresh = iso => { if(!iso) return ""; const s=Math.round((Date.now()-new Date(iso))/1000);
+  if(s<10) return "just now"; if(s<60) return s+"s ago"; const m=Math.floor(s/60);
+  return m<60? m+"m ago": Math.floor(m/60)+"h ago"; };
+
+// goal-to-go is the reliable, text-derived slice of "red zone" we can read
+const isRedzone = sc => !!(sc && sc.downDistance && /GOAL/i.test(sc.downDistance));
+
+// shared status bar: quarter · clock · down&distance, then source + freshness
+function statusHtml(sc){
+  const dd = sc.downDistance ? `<span class="dd">${esc(sc.downDistance)}</span>` : "";
+  const stat = [sc.quarter?`<span class="q">${esc(sc.quarter)}</span>`:"",
+                sc.clock?`<span class="clk">${esc(sc.clock)}</span>`:"", dd]
+                .filter(Boolean).join(" · ") || "LIVE";
+  const srcCls = sc.stale?"src stale":(sc.source==="manual"?"src manual":"src");
+  const base = sc.stale?"reading stale":(sc.source==="manual"?"entered":"auto");
+  const srcTxt = sc.updatedAt ? `${base} · ${fmtFresh(sc.updatedAt)}` : base;
+  return `${stat}<span class="${srcCls}">${srcTxt}</span>`;
+}
 
 // ---------- LIVE ----------
 async function renderLive(){
@@ -246,6 +286,7 @@ async function renderLive(){
     `<p class="section-note">${onD.length} playing the dynasty${games!==onD.length? ` · ${games} game${games!==1?'s':''}`:""}</p>`
     + `<div class="grid">${html}</div>`;
   flashChanges(sorted);
+  checkGameAlerts(sorted);
 }
 
 // A stable key for a game so two coaches in the same matchup group together.
@@ -263,21 +304,20 @@ function mergedCard(group){
   const sc = best.score;
   const awayT = teamOf(nameFromAbbr(sc.away)||""), homeT = teamOf(nameFromAbbr(sc.home)||"");
   const aLead=(sc.awayScore??0)>(sc.homeScore??0), hLead=(sc.homeScore??0)>(sc.awayScore??0);
-  const srcCls = sc.stale?"src stale":(sc.source==="manual"?"src manual":"src");
-  const srcTxt = sc.stale?"reading stale":(sc.source==="manual"?"entered":"auto");
-  const stat = [sc.quarter?`<span class="q">${esc(sc.quarter)}</span>`:"", sc.clock?`<span class="clk">${esc(sc.clock)}</span>`:""].filter(Boolean).join(" · ") || "LIVE";
+  const rz = isRedzone(sc);
   const watches = group.map(s=>`<a class="watch" href="${s.url}" target="_blank">▶ ${esc(s.coach)}</a>`).join("");
   const totalViewers = group.reduce((n,s)=>n+(s.viewers||0),0);
-  return `<div class="game" data-twitch="${esc(best.twitch)}">
+  return `<div class="game${rz?' redzone':''}" data-twitch="${esc(best.twitch)}">
     <div class="stripe" style="background:linear-gradient(90deg,${awayT.c} 50%, ${homeT.c} 50%)"></div>
     <div class="top"><span class="badge-live"><span class="d"></span>LIVE</span>
       <span style="font-size:11px;color:var(--muted);font-weight:700;margin-left:6px">HEAD-TO-HEAD</span>
+      ${rz?'<span class="rz-badge">RED ZONE</span>':''}
       <span class="eyes">👁 ${totalViewers}</span></div>
     <div class="rows">
-      ${teamRow(sc.away, awayT, sc.awayScore, aLead)}
-      ${teamRow(sc.home, homeT, sc.homeScore, hLead)}
+      ${teamRow(sc.away, awayT, sc.awayScore, aLead, sc.possession==="away")}
+      ${teamRow(sc.home, homeT, sc.homeScore, hLead, sc.possession==="home")}
     </div>
-    <div class="status">${stat}<span class="${srcCls}">${srcTxt}</span></div>
+    <div class="status">${statusHtml(sc)}</div>
     <div class="foot"><span class="who">${group.map(s=>esc(s.coach)).join(" vs ")} · both live</span>
       <div class="btns">
         <button class="edit" onclick="editScore('${esc(best.twitch)}','${esc(best.coach)}')">✎</button>
@@ -303,11 +343,65 @@ function flashChanges(streams){
 }
 let SOUND_ON=true, actx=null;
 function unlockAudio(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==="suspended") actx.resume(); }catch{} }
-function playAlert(){ if(!SOUND_ON) return; unlockAudio(); if(!actx) return;
-  const t=actx.currentTime, o=actx.createOscillator(), g=actx.createGain();
-  o.type="triangle"; o.frequency.setValueAtTime(784,t); o.frequency.setValueAtTime(1175,t+0.11);
-  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.3,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.4);
-  o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t+0.42);
+// one short note
+function beep(freqs, start, dur, vol){ if(!actx) return;
+  const o=actx.createOscillator(), g=actx.createGain(); o.type="triangle";
+  freqs.forEach((f,i)=>o.frequency.setValueAtTime(f, start + i*(dur/freqs.length)));
+  g.gain.setValueAtTime(0.0001,start); g.gain.exponentialRampToValueAtTime(vol||0.3,start+0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001,start+dur);
+  o.connect(g); g.connect(actx.destination); o.start(start); o.stop(start+dur+0.02);
+}
+// distinct sound per alert type
+function playAlert(type){ if(!SOUND_ON) return; unlockAudio(); if(!actx) return;
+  const t=actx.currentTime;
+  switch(type){
+    case "half":   beep([523],t,0.18); beep([392],t+0.2,0.28); break;                 // two soft descending notes
+    case "q4":     beep([659],t,0.14); beep([880],t+0.16,0.22); break;                // rising, brighter
+    case "twomin": beep([988],t,0.12); beep([988],t+0.18,0.12); beep([988],t+0.36,0.16); break; // triple tick
+    case "close":  beep([880],t,0.12,0.34); beep([1175],t+0.14,0.12,0.34); beep([1568],t+0.28,0.22,0.34); break; // urgent climb
+    default:       beep([784,1175],t,0.4); break;                                     // score change
+  }
+}
+// small non-blocking banner
+function showToast(title, sub, cls){
+  const c=document.getElementById("toasts"); if(!c) return;
+  const el=document.createElement("div"); el.className="toast"+(cls?" "+cls:"");
+  el.innerHTML=`<span class="tt">${esc(title)}</span>${sub?`<span class="ts">${esc(sub)}</span>`:""}`;
+  c.appendChild(el);
+  setTimeout(()=>{ el.classList.add("fade"); setTimeout(()=>el.remove(),500); }, 6500);
+}
+function fireAlert(type, title, sub){ playAlert(type); showToast(title, sub, type==="close"?"close":""); }
+
+const parseClock = c => { if(!c) return null; const m=/^(\d{1,2}):(\d{2})$/.exec(String(c).trim());
+  return m ? (+m[1])*60 + (+m[2]) : null; };
+const gameLabel = sc => `${nameFromAbbr(sc.away)?abbrOf(nameFromAbbr(sc.away)):(sc.away||"?")} ${sc.awayScore??0} @ ${nameFromAbbr(sc.home)?abbrOf(nameFromAbbr(sc.home)):(sc.home||"?")} ${sc.homeScore??0}`;
+
+// halftime / start-of-4th / 2-minute-warning / close-game-into-4th, fired once per game per event
+const ALERT_STATE={};
+function checkGameAlerts(streams){
+  // collapse a head-to-head to one entry so an alert fires once
+  const seen={};
+  streams.forEach(s=>{ const sc=s.score; if(!sc) return; const k=gameKey(s)||("solo:"+s.twitch);
+    if(!seen[k] || liveQuality(s)>liveQuality(seen[k])) seen[k]=s; });
+  for(const k of Object.keys(seen)){
+    const sc=seen[k].score, q=sc.quarter||null, secs=parseClock(sc.clock);
+    let st=ALERT_STATE[k];
+    if(!st){ ALERT_STATE[k]={q, fired:{}}; continue; }  // baseline on first sight — never alert on page load
+    const label=gameLabel(sc);
+    if(q==="HALF" && st.q!=="HALF" && !st.fired.half){ st.fired.half=1; fireAlert("half","🏈 Halftime", label); }
+    if(q==="4TH" && st.q!=="4TH" && !st.fired.q4){
+      st.fired.q4=1;
+      const known=sc.awayScore!=null && sc.homeScore!=null;
+      const margin=Math.abs((sc.awayScore??0)-(sc.homeScore??0));
+      if(known && margin<=8) fireAlert("close","🔥 Close game — entering the 4th", `${label} · ${margin===0?"tied":margin+" apart"}`);
+      else fireAlert("q4","🏈 4th quarter", label);
+    }
+    if((q==="2ND"||q==="4TH") && secs!=null && secs<=120){
+      const key="twomin_"+q;
+      if(!st.fired[key]){ st.fired[key]=1; fireAlert("twomin","⏰ 2-minute warning", `${label} · ${q}`); }
+    }
+    st.q=q;
+  }
 }
 document.addEventListener("click", unlockAudio, {once:true});
 { const sb=document.getElementById("soundbtn");
@@ -345,17 +439,15 @@ function card(s){
     const awayT = teamOf(nameFromAbbr(sc.away)||"");
     const aLead = (sc.awayScore??0) > (sc.homeScore??0);
     const hLead = (sc.homeScore??0) > (sc.awayScore??0);
-    const srcCls = sc.stale?"src stale":(sc.source==="manual"?"src manual":"src");
-    const srcTxt = sc.stale?"reading stale":(sc.source==="manual"?"entered":"auto");
-    const stat = [sc.quarter?`<span class="q">${esc(sc.quarter)}</span>`:"", sc.clock?`<span class="clk">${esc(sc.clock)}</span>`:""].filter(Boolean).join(" · ") || "LIVE";
-    return `<div class="game" data-twitch="${esc(s.twitch)}">
+    const rz = isRedzone(sc);
+    return `<div class="game${rz?' redzone':''}" data-twitch="${esc(s.twitch)}">
       <div class="stripe" style="background:linear-gradient(90deg,${awayT.c} 50%, ${homeT.c} 50%)"></div>
-      <div class="top"><span class="badge-live"><span class="d"></span>LIVE</span><span class="eyes">👁 ${s.viewers}</span></div>
+      <div class="top"><span class="badge-live"><span class="d"></span>LIVE</span>${rz?'<span class="rz-badge">RED ZONE</span>':''}<span class="eyes">👁 ${s.viewers}</span></div>
       <div class="rows">
-        ${teamRow(sc.away, awayT, sc.awayScore, aLead)}
-        ${teamRow(sc.home, homeT, sc.homeScore, hLead)}
+        ${teamRow(sc.away, awayT, sc.awayScore, aLead, sc.possession==="away")}
+        ${teamRow(sc.home, homeT, sc.homeScore, hLead, sc.possession==="home")}
       </div>
-      <div class="status">${stat}<span class="${srcCls}">${srcTxt}</span></div>
+      <div class="status">${statusHtml(sc)}</div>
       <div class="foot"><span class="who">${esc(s.coach)} streaming · ${liveLen(s.startedAt)}</span>
         <div class="btns">
           <button class="edit" onclick="editScore('${esc(s.twitch)}','${esc(s.coach)}')">✎</button>
@@ -382,14 +474,15 @@ function card(s){
   </div>`;
 }
 
-function teamRow(abbr, tcol, score, lead){
+function teamRow(abbr, tcol, score, lead, poss){
   const name = nameFromAbbr(abbr);
   const col  = name ? TEAMS[name] : DEFT;
   const chip = name ? col.a : (normT(abbr).slice(0,4).toUpperCase() || "—");
   const display = name || abbr || "Team";
+  const ball = poss ? ' <span class="poss" title="Has the ball">🏈</span>' : '';
   return `<div class="team ${lead?'lead':(score!=null?'trail':'')}">
     <div class="logo" style="background:${col.c};color:${col.t}">${esc(chip)}</div>
-    <div><div class="tname">${esc(display)}</div></div>
+    <div><div class="tname">${esc(display)}${ball}</div></div>
     <div class="score">${score==null?"–":score}</div>
   </div>`;
 }
