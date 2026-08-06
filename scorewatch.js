@@ -28,6 +28,13 @@ const FRAME_TTL = Number(process.env.SCORE_STALE_SECONDS || 120) * 1000;
 // grab up to N frames per read so a replay/menu/blurry moment doesn't lose the score
 // (stops early once a clean full read is found, so it's not always all N)
 const GRAB_ATTEMPTS = Number(process.env.SCORE_GRAB_ATTEMPTS || 5);
+// When a score appears to RESET/drop mid-game, re-pull this many frames to
+// confidently re-sync to the true current score (loosens the "never drop" rule).
+const RESET_CONFIRM_FRAMES = Number(process.env.SCORE_RESET_FRAMES || 20);
+const RESET_CONFIRM_CONF = Number(process.env.SCORE_RESET_CONF || 0.45);
+// On a missed/incomplete read, retry immediately this many times before giving
+// up for the cycle (instead of waiting a full interval).
+const MISS_RETRIES = Number(process.env.SCORE_MISS_RETRIES || 3);
 const GRAB_GAP_MS = Number(process.env.SCORE_GRAB_GAP_MS || 1000);
 // don't archive to Final until a live stream has been missing this many checks
 // (Twitch occasionally omits a live channel for one cycle)
@@ -266,18 +273,20 @@ function consensus(reads) {
   };
 }
 
-// Read one stream: grab GRAB_ATTEMPTS frames spread over a few seconds and return
-// the consensus across them, so a replay/menu/blurry/garbled frame is outvoted.
-// `frameOverride` lets tests skip grab.sh and read a fixed frame once.
-async function readOne(login, frameOverride) {
+// Read one stream: grab `frames` frames spread over a few seconds and return the
+// consensus across them, so a replay/menu/blurry/garbled frame is outvoted.
+// `frameOverride` lets tests skip grab.sh and read a fixed frame once. A larger
+// `frames` (e.g. 20) is used to re-sync confidently after an apparent score reset.
+async function readOne(login, frameOverride, frames = GRAB_ATTEMPTS) {
   if (frameOverride) return readFrame(frameOverride);
   const prefix = path.join(os.tmpdir(), `frame_${login}`);
   let reads = [];
   try {
-    // one stream pull -> GRAB_ATTEMPTS frames (spread ~1s apart) -> one OCR process
-    await execFileP("bash", [path.join(SCORE_DIR, "grab.sh"), login, prefix, String(GRAB_ATTEMPTS)], { timeout: 90000 });
+    // one stream pull -> N frames (spread ~1s apart) -> one OCR process
+    await execFileP("bash", [path.join(SCORE_DIR, "grab.sh"), login, prefix, String(frames)],
+      { timeout: Math.max(90000, frames * 4000) });
     const files = [];
-    for (let i = 1; i <= GRAB_ATTEMPTS; i++) { const fp = `${prefix}_${i}.jpg`; if (fs.existsSync(fp)) files.push(fp); }
+    for (let i = 1; i <= frames; i++) { const fp = `${prefix}_${i}.jpg`; if (fs.existsSync(fp)) files.push(fp); }
     if (files.length) reads = (await readFrames(files)).filter(r => r && r.ok);
   } catch (e) { /* stream not grabbable this cycle — keep prior reading */ }
   return consensus(reads);
@@ -462,28 +471,45 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
     const batch = queue.slice(i, i + CONCURRENCY);
     await Promise.all(batch.map(async login => {
       try {
-        const r = await readOne(login, frameFor ? frameFor(login) : null);
-        // accept if both scores clearly read (strong validity), or confidence clears the bar
-        const bothScores = r.ok && r.awayScore != null && r.homeScore != null;
-        if (r.ok && (bothScores || (r.confidence ?? 0) >= MIN_CONF)) {
+        const complete = x => x && x.ok && x.awayScore != null && x.homeScore != null;
+        const acceptable = x => x && x.ok && (complete(x) || (x.confidence ?? 0) >= MIN_CONF);
+        // Read; if the read is missed/incomplete, RETRY IMMEDIATELY (don't wait a
+        // whole interval) until we collect a usable read or hit the retry cap.
+        let r = await readOne(login, frameFor ? frameFor(login) : null);
+        for (let t = 0; t < MISS_RETRIES && !acceptable(r) && !frameFor; t++) {
+          r = await readOne(login, null);
+        }
+        if (acceptable(r)) {
           const st = liveByLogin.get(login) || {};
           const prev = scores[login];
           // sticky: once a read shows their team, stay confirmed for the session
           const confirmed = prev?.dynastyConfirmed || scoreConfirmsTeam(r, st.team);
-          // Scores never go backwards within a game. Guards against garbage
-          // end-of-game camera reads: a lower/blank read keeps the prior value.
-          // Quarter is sticky and only advances (1st->2nd->3rd->4th->OT), so once
-          // it's captured it stays accurate even on frames where it doesn't read.
           let a = r.awayScore, h = r.homeScore, q = r.quarter;
           let away = r.away, home = r.home;
           if (prev && prev.startedAt === (st.startedAt || null)) {
-            // Scores only ever climb within a game, so a lower/blank read is a
-            // misread (e.g. "21" clipped to "1") — keep the prior value.
-            if (a == null || (prev.awayScore != null && a < prev.awayScore)) a = prev.awayScore;
-            if (h == null || (prev.homeScore != null && h < prev.homeScore)) h = prev.homeScore;
+            // Apparent score RESET (a read lower than stored)? Don't blindly keep
+            // the old value and don't trust one low read either — pull a big batch
+            // of frames and re-sync to the true current score only if they agree.
+            const wouldDrop = (a != null && prev.awayScore != null && a < prev.awayScore) ||
+                              (h != null && prev.homeScore != null && h < prev.homeScore);
+            if (wouldDrop && !frameFor) {
+              const rc = await readOne(login, null, RESET_CONFIRM_FRAMES);
+              if (complete(rc) && (rc.confidence ?? 0) >= RESET_CONFIRM_CONF) {
+                a = rc.awayScore; h = rc.homeScore;               // confident re-sync (may drop)
+                if (rc.quarter) q = rc.quarter;
+                if (rc.away) away = rc.away;
+                if (rc.home) home = rc.home;
+                console.log(`score re-synced ${login}: ${a}-${h} (${rc.frames}f)`);
+              } else {                                            // not confident — keep prior
+                a = prev.awayScore; h = prev.homeScore;
+              }
+            } else {
+              // normal: a blank/low single read never lowers the score
+              if (a == null || (prev.awayScore != null && a < prev.awayScore)) a = prev.awayScore;
+              if (h == null || (prev.homeScore != null && h < prev.homeScore)) h = prev.homeScore;
+            }
+            // quarter only advances; verified team names stay locked
             if (!q || (QRANK[q] || 0) < (QRANK[prev.quarter] || 0)) q = prev.quarter;
-            // Once a team name is verified as a real school, LOCK it for the rest
-            // of the game — later garbled reads can't overwrite "Stanford" etc.
             if (resolveAny(prev.away)) away = prev.away;
             if (resolveAny(prev.home)) home = prev.home;
           }
