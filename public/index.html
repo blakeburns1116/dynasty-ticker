@@ -403,10 +403,19 @@ async function renderLive(){
   }
   const sorted=[...streams].sort((a,b)=>(b.onDynasty-a.onDynasty)||((b.score?1:0)-(a.score?1:0))||(b.viewers-a.viewers));
   // group the two streams of a head-to-head into one card
-  const groups={}, order=[];
-  for(const s of sorted){ const k=gameKey(s)||("solo:"+s.twitch); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(s); }
-  const html = order.map(k=> groups[k].length>=2 ? mergedCard(groups[k]) : card(groups[k][0])).join("");
-  const games = order.length;
+  // Merge the two streams of a head-to-head into one card. Cluster by any SHARED
+  // roster team: each roster team belongs to exactly one coach, so if two live
+  // streams both show it, they're the same game — robust even if the other team
+  // name is garbled on one of them.
+  const clusters=[];
+  for(const s of sorted){
+    const rt = rosterTeams(s);
+    let c = rt.length ? clusters.find(cl => rt.some(t => cl.teams.has(t))) : null;
+    if(c){ rt.forEach(t=>c.teams.add(t)); c.streams.push(s); }
+    else clusters.push({ teams:new Set(rt), streams:[s] });
+  }
+  const html = clusters.map(c => c.streams.length>=2 ? mergedCard(c.streams) : card(c.streams[0])).join("");
+  const games = clusters.length;
   $("#live").innerHTML =
     `<p class="section-note">${onD.length} playing the dynasty${games!==onD.length? ` · ${games} game${games!==1?'s':''}`:""}</p>`
     + `<div class="grid">${html}</div>`;
@@ -414,6 +423,14 @@ async function renderLive(){
   checkGameAlerts(sorted);
 }
 
+// Roster teams shown on a stream's score bug (each is unique to one coach, so a
+// shared one means two streams are the same head-to-head game).
+function rosterTeams(s){
+  const sc=s.score; if(!sc) return [];
+  const out=[];
+  for(const raw of [sc.away, sc.home]){ if(!raw) continue; const n=nameFromAbbr(raw); if(n) out.push(normT(n)); }
+  return out;
+}
 // A stable key for a game so two coaches in the same matchup group together.
 function gameKey(s){
   const sc=s.score; if(!sc || !sc.away || !sc.home) return null;
