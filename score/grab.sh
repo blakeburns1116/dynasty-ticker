@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# grab.sh LOGIN OUTPUT.jpg
-# Capture ONE frame from a live Twitch stream at the HIGHEST available quality.
-# "best" always resolves to the top quality the streamer actually broadcasts
-# (we can't exceed their source resolution). Exit 0 on success.
+# grab.sh LOGIN OUTPREFIX [COUNT]
+# Capture COUNT frames (~1 second apart) from a live Twitch stream in ONE pull,
+# so we can vote across several screenshots without spawning many pipelines.
+# Writes OUTPREFIX_1.jpg .. OUTPREFIX_COUNT.jpg. Exit 0 on success.
 set -euo pipefail
-login="${1:?usage: grab.sh LOGIN OUTPUT.jpg}"
-out="${2:?usage: grab.sh LOGIN OUTPUT.jpg}"
+login="${1:?usage: grab.sh LOGIN OUTPREFIX [COUNT]}"
+prefix="${2:?usage: grab.sh LOGIN OUTPREFIX [COUNT]}"
+count="${3:-5}"
 
 # best first = highest the streamer sends; explicit fallbacks just in case.
 url="$(streamlink --twitch-disable-ads --stream-url "twitch.tv/${login}" \
@@ -15,6 +16,7 @@ if [ -z "${url}" ]; then
   exit 1
 fi
 
-# -ss 1 skips a second so we don't land on a keyframe mid-transition; one frame.
-ffmpeg -y -loglevel error -ss 1 -i "${url}" -frames:v 1 -q:v 2 "${out}" </dev/null
-echo "wrote ${out}"
+# One ffmpeg pass, 1 frame/sec for COUNT frames — different moments for voting,
+# one decode pipeline (light on memory).
+ffmpeg -y -loglevel error -i "${url}" -vf fps=1 -frames:v "${count}" -q:v 2 "${prefix}_%d.jpg" </dev/null
+echo "wrote ${count} frames to ${prefix}"

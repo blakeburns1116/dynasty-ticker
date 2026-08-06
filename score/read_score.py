@@ -307,13 +307,14 @@ def read(path, template):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("frame")
+    ap.add_argument("frame", nargs="+")  # one or many frames (read all in one process)
     ap.add_argument("--template", default=os.path.join(HERE, "template.json"))
     ap.add_argument("--debug", action="store_true")
     args = ap.parse_args()
     tpl = load_template(args.template)
-    result = read(args.frame, tpl)
-    print(json.dumps(result))
+    results = [read(f, tpl) for f in args.frame]
+    # single frame -> one object (back-compat); many frames -> {"frames":[...]}
+    print(json.dumps(results[0] if len(results) == 1 else {"frames": results}))
     if args.debug:
         sys.stderr.write(f"template: {args.template}\n")
 
