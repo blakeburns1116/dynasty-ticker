@@ -22,12 +22,12 @@ const SCORE_DIR = path.join(__dirname, "score");
 
 const ENABLED = process.env.SCORE_ENABLED === "1";
 const INTERVAL = Number(process.env.SCORE_SECONDS || 25) * 1000;
-const CONCURRENCY = Number(process.env.SCORE_CONCURRENCY || 2);
+const CONCURRENCY = Number(process.env.SCORE_CONCURRENCY || 1);
 const MIN_CONF = Number(process.env.SCORE_MIN_CONFIDENCE || 0.22);
 const FRAME_TTL = Number(process.env.SCORE_STALE_SECONDS || 120) * 1000;
 // grab up to N frames per read so a replay/menu/blurry moment doesn't lose the score
 // (stops early once a clean full read is found, so it's not always all N)
-const GRAB_ATTEMPTS = Number(process.env.SCORE_GRAB_ATTEMPTS || 3);
+const GRAB_ATTEMPTS = Number(process.env.SCORE_GRAB_ATTEMPTS || 5);
 const GRAB_GAP_MS = Number(process.env.SCORE_GRAB_GAP_MS || 1000);
 // don't archive to Final until a live stream has been missing this many checks
 // (Twitch occasionally omits a live channel for one cycle)
@@ -190,6 +190,17 @@ async function readFrame(frame) {
   return JSON.parse(stdout.trim());
 }
 
+// OCR several frame files in ONE python process (loads OpenCV/Tesseract once).
+async function readFrames(files) {
+  const { stdout } = await execFileP(
+    "python3",
+    [path.join(SCORE_DIR, "read_score.py"), ...files, "--template", path.join(SCORE_DIR, "template.json")],
+    { timeout: 60000 }
+  );
+  const j = JSON.parse(stdout.trim());
+  return j.frames ? j.frames : [j];
+}
+
 // Score a read's completeness so we can keep the best of several frames.
 function readQuality(r) {
   if (!r || !r.ok) return -1;
@@ -217,9 +228,13 @@ function bestTeamName(vals) {
   if (!nn.length) return null;
   const m = new Map();
   for (const v of nn) m.set(v, (m.get(v) || 0) + 1);
-  let best = null, bc = 0;
-  for (const [v, c] of m) if (c > bc || (c === bc && best && v.length > best.length)) { bc = c; best = v; }
-  return best;
+  const entries = [...m.entries()];
+  // Prefer reads that resolve to a REAL school (roster or FBS) over garbles like
+  // "FU"/"MICHIG"; then most common; then the longer (less-truncated) spelling.
+  const resolvable = entries.filter(([v]) => resolveAny(v));
+  const pool = resolvable.length ? resolvable : entries;
+  pool.sort((a, b) => b[1] - a[1] || b[0].length - a[0].length);
+  return pool[0][0];
 }
 // Fuse several frame reads into one consensus reading. Each field is decided by a
 // vote across frames, so a single garbled frame can't move a score. Scores must
@@ -256,16 +271,15 @@ function consensus(reads) {
 // `frameOverride` lets tests skip grab.sh and read a fixed frame once.
 async function readOne(login, frameOverride) {
   if (frameOverride) return readFrame(frameOverride);
-  const frame = path.join(os.tmpdir(), `frame_${login}.jpg`);
-  const reads = [];
-  for (let i = 0; i < GRAB_ATTEMPTS; i++) {
-    try {
-      await execFileP("bash", [path.join(SCORE_DIR, "grab.sh"), login, frame], { timeout: 30000 });
-      const r = await readFrame(frame);
-      if (r && r.ok) reads.push(r);
-    } catch (e) { /* try the next frame */ }
-    if (i < GRAB_ATTEMPTS - 1) await new Promise(res => setTimeout(res, GRAB_GAP_MS));
-  }
+  const prefix = path.join(os.tmpdir(), `frame_${login}`);
+  let reads = [];
+  try {
+    // one stream pull -> GRAB_ATTEMPTS frames (spread ~1s apart) -> one OCR process
+    await execFileP("bash", [path.join(SCORE_DIR, "grab.sh"), login, prefix, String(GRAB_ATTEMPTS)], { timeout: 90000 });
+    const files = [];
+    for (let i = 1; i <= GRAB_ATTEMPTS; i++) { const fp = `${prefix}_${i}.jpg`; if (fs.existsSync(fp)) files.push(fp); }
+    if (files.length) reads = (await readFrames(files)).filter(r => r && r.ok);
+  } catch (e) { /* stream not grabbable this cycle — keep prior reading */ }
   return consensus(reads);
 }
 
