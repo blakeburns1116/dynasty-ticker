@@ -22,12 +22,12 @@ const SCORE_DIR = path.join(__dirname, "score");
 
 const ENABLED = process.env.SCORE_ENABLED === "1";
 const INTERVAL = Number(process.env.SCORE_SECONDS || 25) * 1000;
-const CONCURRENCY = Number(process.env.SCORE_CONCURRENCY || 3);
+const CONCURRENCY = Number(process.env.SCORE_CONCURRENCY || 2);
 const MIN_CONF = Number(process.env.SCORE_MIN_CONFIDENCE || 0.22);
 const FRAME_TTL = Number(process.env.SCORE_STALE_SECONDS || 120) * 1000;
 // grab up to N frames per read so a replay/menu/blurry moment doesn't lose the score
 // (stops early once a clean full read is found, so it's not always all N)
-const GRAB_ATTEMPTS = Number(process.env.SCORE_GRAB_ATTEMPTS || 6);
+const GRAB_ATTEMPTS = Number(process.env.SCORE_GRAB_ATTEMPTS || 3);
 const GRAB_GAP_MS = Number(process.env.SCORE_GRAB_GAP_MS || 1000);
 // don't archive to Final until a live stream has been missing this many checks
 // (Twitch occasionally omits a live channel for one cycle)
@@ -537,9 +537,13 @@ export function startLoop(getLiveStreams) {
     return;
   }
   console.log(`Score reading ON — every ${INTERVAL / 1000}s, ${CONCURRENCY} streams at a time.`);
+  let running = false;
   const tick = async () => {
+    if (running) return; // never let a slow cycle pile up on top of another (memory guard)
+    running = true;
     try { await updateScores(getLiveStreams()); }
     catch (e) { console.error("score loop error:", e.message); }
+    finally { running = false; }
   };
   tick();
   setInterval(tick, INTERVAL);
