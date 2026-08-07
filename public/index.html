@@ -342,12 +342,22 @@ const OPP = {
   "sandiegostate":{n:"San Diego State",c:"#A6192E",t:"#000000",a:"SDSU"},
   "hawaii":{n:"Hawaii",c:"#024731",t:"#ffffff",a:"HAW"},
   "oregonstate":{n:"Oregon State",c:"#DC4405",t:"#000000",a:"ORST"},
+  "louisianatech":{n:"Louisiana Tech",c:"#002F8B",t:"#E31B23",a:"LT"},
+  "delaware":{n:"Delaware",c:"#00539F",t:"#FFD200",a:"DEL"},
+  "missouristate":{n:"Missouri State",c:"#5E0009",t:"#ffffff",a:"MOST"},
 };
 // a few name variants the score bug may show
 const OPP_ALIAS = {
   "mississippi":"olemiss", "southerncalifornia":"usc", "pitt":"pittsburgh",
-  "miamifl":"miami", "hawaii":"hawaii", "ulm":"ulmonroe", "usf":"southflorida",
-  "ncst":"ncstate", "texasa":"texasam", "tamu":"texasam",
+  "miamifl":"miami", "miamiflorida":"miami", "ulm":"ulmonroe", "usf":"southflorida",
+  "ncst":"ncstate", "northcarolinastate":"ncstate", "texasa":"texasam", "tamu":"texasam",
+  "connecticut":"uconn", "massachusetts":"umass", "lamonroe":"ulmonroe",
+  "louisianamonroe":"ulmonroe", "latech":"louisianatech", "mtsu":"middletennessee",
+  "middletenn":"middletennessee", "wku":"westernkentucky", "westernky":"westernkentucky",
+  "samhoustonstate":"samhouston", "fla":"florida", "pittsburg":"pittsburgh",
+  "olemississippi":"olemiss", "southerncal":"usc", "bostoncol":"bostoncollege",
+  "wvu":"westvirginia", "westernmich":"westernmichigan", "centralmich":"centralmichigan",
+  "easternmich":"easternmichigan", "northernill":"northernillinois",
 };
 
 const $ = s => document.querySelector(s);
@@ -644,8 +654,8 @@ function nameFromAbbr(ab){
   for(const [name,v] of Object.entries(TEAMS)){
     const n = normT(name), a = normT(v.a);
     if(o===n || o===a) return name;
-    if(n.length>=4 && o.includes(n)) return name;
-    if(a.length>=4 && o.includes(a)) return name;
+    if(n.length>=4 && o.includes(n) && o.length-n.length<=3) return name;
+    if(a.length>=4 && o.includes(a) && o.length-a.length<=3) return name;
   }
   if(o.length>=6){
     let best=null, bs=0;
@@ -662,7 +672,7 @@ function resolveOpp(ab){
   if(!o) return null;
   if(OPP[o]) return OPP[o];
   if(OPP_ALIAS[o]) return OPP[OPP_ALIAS[o]];
-  for(const k in OPP){ if(k.length>=5 && (o.includes(k)||k.includes(o))) return OPP[k]; }
+  for(const k in OPP){ if(k.length>=5 && ((o.includes(k)&&o.length-k.length<=3)||k.includes(o))) return OPP[k]; }
   if(o.length>=5){ let best=null,bs=0,second=0; for(const k in OPP){ if(k.length<6 || Math.abs(o.length-k.length)>2 || k.startsWith(o)) continue; const s=sim(o,k); if(s>bs){second=bs;bs=s;best=OPP[k];} else if(s>second){second=s;} } if(best && bs>=0.6 && (bs-second)>=0.08) return best; }
   return null;
 }
