@@ -55,7 +55,9 @@ export function matchesTeam(ocrText, teamName) {
   const o = norm(ocrText);
   if (!o) return false;
   const aliases = (TEAM_ALIASES[teamName] || [teamName]).map(norm);
-  if (aliases.some(a => a === o || (a.length >= 4 && o.includes(a)))) return true;
+  // exact, or the alias is contained in the read but only a few garble chars longer
+  // (so "louisianatech" doesn't match "louisiana", "michiganstate" not "michigan")
+  if (aliases.some(a => a === o || (a.length >= 4 && o.includes(a) && o.length - a.length <= 3))) return true;
   // fuzzy only against full names (>=8 chars) AND only when the lengths are close,
   // so a bare name never matches its "State" sibling (Washington vs Washington State).
   if (o.length >= 6 && aliases.some(a => a.length >= 8 && Math.abs(o.length - a.length) <= 2 && !a.startsWith(o) && sim(o, a) >= 0.62)) return true;
@@ -85,6 +87,10 @@ const FBS_NAMES = [
   "georgiastate","southalabama","troy","arkansasstate","ulmonroe","akron","bowlinggreen","buffalo",
   "centralmichigan","easternmichigan","kentstate","northernillinois","ohio","westernmichigan",
   "nevada","unlv","newmexico","sandiegostate","hawaii","oregonstate",
+  "louisianatech","delaware","missouristate",
+  // alternate on-screen name forms so the lock recognizes them as real schools
+  "connecticut","massachusetts","louisianamonroe","lamonroe","latech","mtsu",
+  "westernkentucky","samhoustonstate","northcarolinastate","southerncalifornia",
 ];
 
 // Is an OCR'd team string a real, recognizable school (roster OR any FBS team)?
@@ -96,7 +102,7 @@ export function resolveAny(ocrText) {
   const o = norm(ocrText);
   if (!o) return null;
   if (FBS_NAMES.includes(o)) return o;
-  for (const k of FBS_NAMES) if (k.length >= 5 && (o.includes(k) || k.includes(o))) return k;
+  for (const k of FBS_NAMES) if (k.length >= 5 && ((o.includes(k) && o.length - k.length <= 3) || k.includes(o))) return k;
   if (o.length >= 5) {
     let best = null, bs = 0, second = 0;
     for (const k of FBS_NAMES) { if (k.length < 6 || Math.abs(o.length - k.length) > 2 || k.startsWith(o)) continue; const s = sim(o, k); if (s > bs) { second = bs; bs = s; best = k; } else if (s > second) second = s; }
@@ -114,7 +120,7 @@ export function resolveTeam(ocrText) {
   // strong: an exact/contained alias wins immediately
   for (const name of Object.keys(TEAM_ALIASES)) {
     const aliases = (TEAM_ALIASES[name] || [name]).map(norm);
-    if (aliases.some(a => a === o || (a.length >= 4 && o.includes(a)))) return name;
+    if (aliases.some(a => a === o || (a.length >= 4 && o.includes(a) && o.length - a.length <= 3))) return name;
   }
   // fuzzy: pick the BEST similarity across full-length aliases (avoids the first
   // over-threshold alias winning, e.g. garbled "EXASSTATE" -> Texas State not Jax State)
