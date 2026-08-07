@@ -508,10 +508,15 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
               if (a == null || (prev.awayScore != null && a < prev.awayScore)) a = prev.awayScore;
               if (h == null || (prev.homeScore != null && h < prev.homeScore)) h = prev.homeScore;
             }
-            // quarter only advances; verified team names stay locked
+            // quarter only advances
             if (!q || (QRANK[q] || 0) < (QRANK[prev.quarter] || 0)) q = prev.quarter;
-            if (resolveAny(prev.away)) away = prev.away;
-            if (resolveAny(prev.home)) home = prev.home;
+            // Keep a verified team name locked against garbles — BUT release it when
+            // the current read is ALSO a verified, DIFFERENT school (the opponent
+            // genuinely changed, e.g. a new game within the same stream). Otherwise
+            // a stale lock shows the wrong team (e.g. "Arkansas" when it's Houston).
+            const changed = (cur, locked) => resolveAny(cur) && resolveAny(cur) !== resolveAny(locked);
+            if (resolveAny(prev.away) && !changed(away, prev.away)) away = prev.away;
+            if (resolveAny(prev.home) && !changed(home, prev.home)) home = prev.home;
           }
           scores[login] = {
             ...r, away, home, awayScore: a, homeScore: h, quarter: q,
