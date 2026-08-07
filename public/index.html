@@ -358,6 +358,11 @@ const OPP_ALIAS = {
   "olemississippi":"olemiss", "southerncal":"usc", "bostoncol":"bostoncollege",
   "wvu":"westvirginia", "westernmich":"westernmichigan", "centralmich":"centralmichigan",
   "easternmich":"easternmichigan", "northernill":"northernillinois",
+  // EA directional/state abbreviations on the score bug
+  "salabama":"southalabama", "wkentucky":"westernkentucky", "emichigan":"easternmichigan",
+  "cmichigan":"centralmichigan", "wmichigan":"westernmichigan", "nillinois":"northernillinois",
+  "missstate":"mississippistate", "scarolina":"southcarolina", "ncarolina":"northcarolina",
+  "olemiss":"olemiss",
 };
 
 const $ = s => document.querySelector(s);
@@ -647,10 +652,19 @@ function teamRow(abbr, tcol, score, lead, poss){
 const normT = s => (s||"").toString().toLowerCase().replace(/[^a-z0-9]/g,"");
 function lev(a,b){const m=a.length,n=b.length;const d=Array.from({length:m+1},(_,i)=>[i,...Array(n).fill(0)]);for(let j=0;j<=n;j++)d[0][j]=j;for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return d[m][n];}
 const sim=(a,b)=>{const L=Math.max(a.length,b.length);return L?1-lev(a,b)/L:0;};
+const fsim=(o,a)=>{ if(o.endsWith('state')&&a.endsWith('state')){ const oc=o.slice(0,-5),ac=a.slice(0,-5); return (oc.length>=3&&ac.length>=3)?sim(oc,ac):0; } return sim(o,a); };
 // map an OCR'd team string back to a roster team name (space-insensitive, fuzzy)
+// EA abbreviates words on the bug ("FLA ATLANTIC", "GA SOUTHERN", "SO MISS"); map
+// those forms to the roster team (nameFromAbbr otherwise only knows full name + abbr).
+const ROSTER_ALIAS = {
+  "flaatlantic":"Florida Atlantic", "flaatl":"Florida Atlantic",
+  "flainternational":"Florida International", "flaintl":"Florida International", "flaint":"Florida International",
+  "gasouthern":"Georgia Southern", "somiss":"Southern Miss", "smiss":"Southern Miss",
+};
 function nameFromAbbr(ab){
   const o = normT(ab);
   if(!o) return null;
+  if(ROSTER_ALIAS[o]) return ROSTER_ALIAS[o];
   for(const [name,v] of Object.entries(TEAMS)){
     const n = normT(name), a = normT(v.a);
     if(o===n || o===a) return name;
@@ -659,7 +673,7 @@ function nameFromAbbr(ab){
   }
   if(o.length>=6){
     let best=null, bs=0;
-    for(const name of Object.keys(TEAMS)){ const nn=normT(name); if(nn.length<8 || Math.abs(o.length-nn.length)>2 || nn.startsWith(o)) continue; const s=sim(o,nn); if(s>bs){bs=s;best=name;} }
+    for(const name of Object.keys(TEAMS)){ const nn=normT(name); if(nn.length<8 || Math.abs(o.length-nn.length)>2 || nn.startsWith(o)) continue; const s=fsim(o,nn); if(s>bs){bs=s;best=name;} }
     if(bs>=0.62) return best;
   }
   return null;
@@ -673,7 +687,7 @@ function resolveOpp(ab){
   if(OPP[o]) return OPP[o];
   if(OPP_ALIAS[o]) return OPP[OPP_ALIAS[o]];
   for(const k in OPP){ if(k.length>=5 && ((o.includes(k)&&o.length-k.length<=3)||k.includes(o))) return OPP[k]; }
-  if(o.length>=5){ let best=null,bs=0,second=0; for(const k in OPP){ if(k.length<6 || Math.abs(o.length-k.length)>2 || k.startsWith(o)) continue; const s=sim(o,k); if(s>bs){second=bs;bs=s;best=OPP[k];} else if(s>second){second=s;} } if(best && bs>=0.6 && (bs-second)>=0.08) return best; }
+  if(o.length>=5){ let best=null,bs=0,second=0; for(const k in OPP){ if(k.length<6 || Math.abs(o.length-k.length)>2 || k.startsWith(o)) continue; const s=fsim(o,k); if(s>bs){second=bs;bs=s;best=OPP[k];} else if(s>second){second=s;} } if(best && bs>=0.6 && (bs-second)>=0.08) return best; }
   return null;
 }
 // color entry for any team string: roster team, else FBS opponent, else neutral.
