@@ -8,10 +8,10 @@ export const TEAM_ALIASES = {
   "Coastal Carolina":     ["coastal carolina", "coastal", "ccu"],
   "Colorado State":       ["colorado state", "colorado st", "colost", "csu"],
   "East Carolina":        ["east carolina", "ecu"],
-  "Florida Atlantic":     ["florida atlantic", "fau"],
-  "Florida International": ["florida international", "fiu"],
+  "Florida Atlantic":     ["florida atlantic", "fla atlantic", "fla atl", "fau"],
+  "Florida International": ["florida international", "fla international", "fla intl", "fiu"],
   "Fresno State":         ["fresno state", "fresno", "fres"],
-  "Georgia Southern":     ["georgia southern", "ga southern", "gasou", "gaso"],
+  "Georgia Southern":     ["georgia southern", "ga southern", "ga so", "gasou", "gaso"],
   "Jacksonville State":   ["jacksonville state", "jax state", "jvst", "jax"],
   "JMU":                  ["james madison", "jmu"],
   "Liberty":              ["liberty", "lib"],
@@ -20,7 +20,7 @@ export const TEAM_ALIASES = {
   "Rice":                 ["rice"],
   "Sacramento State":     ["sacramento state", "sac state", "sacst", "sacramento"],
   "San Jose State":       ["san jose state", "san jose", "sjsu"],
-  "Southern Miss":        ["southern miss", "southern mississippi", "usm"],
+  "Southern Miss":        ["southern miss", "southern mississippi", "so miss", "s miss", "usm"],
   "Temple":               ["temple", "tem"],
   "Texas State":          ["texas state", "texas st", "txst", "txstate"],
   "Toledo":               ["toledo", "tol"],
@@ -47,6 +47,16 @@ function lev(a, b) {
   return d[m][n];
 }
 const sim = (a, b) => { const L = Math.max(a.length, b.length); return L ? 1 - lev(a, b) / L : 0; };
+// Similarity that ignores a shared trailing "state" so different "X State" schools
+// (Miss State vs Wash State) don't collide, while a garbled state name still matches
+// its real school (Washingtn State -> Washington State).
+const fsim = (o, a) => {
+  if (o.endsWith("state") && a.endsWith("state")) {
+    const oc = o.slice(0, -5), ac = a.slice(0, -5);
+    return (oc.length >= 3 && ac.length >= 3) ? sim(oc, ac) : 0;
+  }
+  return sim(o, a);
+};
 
 // Does an OCR'd team string refer to `teamName`?
 // Exact / full-alias-contained, then a fuzzy fallback (>=0.62 similar) for garbled
@@ -60,7 +70,7 @@ export function matchesTeam(ocrText, teamName) {
   if (aliases.some(a => a === o || (a.length >= 4 && o.includes(a) && o.length - a.length <= 3))) return true;
   // fuzzy only against full names (>=8 chars) AND only when the lengths are close,
   // so a bare name never matches its "State" sibling (Washington vs Washington State).
-  if (o.length >= 6 && aliases.some(a => a.length >= 8 && Math.abs(o.length - a.length) <= 2 && !a.startsWith(o) && sim(o, a) >= 0.62)) return true;
+  if (o.length >= 6 && aliases.some(a => a.length >= 8 && Math.abs(o.length - a.length) <= 2 && !a.startsWith(o) && fsim(o, a) >= 0.62)) return true;
   return false;
 }
 
@@ -91,6 +101,8 @@ const FBS_NAMES = [
   // alternate on-screen name forms so the lock recognizes them as real schools
   "connecticut","massachusetts","louisianamonroe","lamonroe","latech","mtsu",
   "westernkentucky","samhoustonstate","northcarolinastate","southerncalifornia",
+  "salabama","wkentucky","emichigan","cmichigan","wmichigan","nillinois",
+  "missstate","scarolina","ncarolina",
 ];
 
 // Is an OCR'd team string a real, recognizable school (roster OR any FBS team)?
@@ -105,7 +117,7 @@ export function resolveAny(ocrText) {
   for (const k of FBS_NAMES) if (k.length >= 5 && ((o.includes(k) && o.length - k.length <= 3) || k.includes(o))) return k;
   if (o.length >= 5) {
     let best = null, bs = 0, second = 0;
-    for (const k of FBS_NAMES) { if (k.length < 6 || Math.abs(o.length - k.length) > 2 || k.startsWith(o)) continue; const s = sim(o, k); if (s > bs) { second = bs; bs = s; best = k; } else if (s > second) second = s; }
+    for (const k of FBS_NAMES) { if (k.length < 6 || Math.abs(o.length - k.length) > 2 || k.startsWith(o)) continue; const s = fsim(o, k); if (s > bs) { second = bs; bs = s; best = k; } else if (s > second) second = s; }
     if (best && bs >= 0.6 && (bs - second) >= 0.08) return best;
   }
   return null;
@@ -129,7 +141,7 @@ export function resolveTeam(ocrText) {
     for (const name of Object.keys(TEAM_ALIASES)) {
       for (const a of (TEAM_ALIASES[name] || [name]).map(norm)) {
         if (a.length < 8 || Math.abs(o.length - a.length) > 2 || a.startsWith(o)) continue;
-        const s = sim(o, a);
+        const s = fsim(o, a);
         if (s > bs) { bs = s; best = name; }
       }
     }
