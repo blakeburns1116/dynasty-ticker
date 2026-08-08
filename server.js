@@ -284,6 +284,18 @@ app.get("/api/finals/add", (req, res) => {
     coach: req.query.coach, team: req.query.team,
   }));
 });
+// Commissioner: create a completed game on the Final board from the admin UI
+// (password-protected, same shared submit password as every other admin edit).
+app.post("/api/finals", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  const b = req.body || {};
+  if (!b.away || !b.home) return res.status(400).json({ error: "away and home required" });
+  res.json(scorewatch.addFinal({
+    away: b.away, home: b.home,
+    awayScore: b.awayScore, homeScore: b.homeScore,
+    coach: b.coach, team: b.team,
+  }));
+});
 app.post("/api/final/:id", (req, res) => {
   if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
   res.json(scorewatch.editFinal(req.params.id, req.body || {}) || {});
