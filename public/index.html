@@ -79,6 +79,10 @@
   .clearall { background:#fff; border:1px solid var(--live); color:var(--live); font-weight:700; font-size:13px;
     padding:9px 15px; border-radius:10px; cursor:pointer; }
   .clearall:hover { background:var(--live); color:#fff; }
+  .addrow { display:flex; justify-content:flex-end; margin:2px 0 14px; }
+  .addfinal { background:var(--ink); border:1px solid var(--ink); color:#fff; font-weight:700; font-size:13px;
+    padding:9px 15px; border-radius:10px; cursor:pointer; }
+  .addfinal:hover { background:#1c2740; }
   .team.lead .score { color:var(--ink); }
   .team.trail { opacity:.62; }
 
@@ -715,14 +719,30 @@ function recFor(x){
 async function renderFinal(){
   const d = await (await fetch("/api/finals")).json();
   const finals = d.finals||[];
+  const addRow = `<div class="addrow"><button class="addfinal" onclick="createFinal()">➕ Create final score</button></div>`;
   if(!finals.length){
-    $("#final").innerHTML = `<div class="empty"><div class="big">🏁</div>
-      <h3>No finals yet</h3><div>When a game wraps, its final score lands here automatically.</div></div>`;
+    $("#final").innerHTML = addRow + `<div class="empty"><div class="big">🏁</div>
+      <h3>No finals yet</h3><div>When a game wraps, its final score lands here automatically — or add one manually above.</div></div>`;
     return;
   }
   $("#final").innerHTML = `<p class="section-note">${finals.length} game${finals.length>1?'s':''} final · kept 48 hours</p>`
+    + addRow
     + `<div class="grid">${finals.map(finalCard).join("")}</div>`
     + `<div class="clearrow"><button class="clearall" onclick="clearAllFinals()">🗑 Clear all finals</button></div>`;
+}
+
+// Commissioner: manually create a final (password-protected via pwFetch).
+async function createFinal(){
+  const cur = prompt("Create a final score.\nFormat: awayAbbr awayScore homeAbbr homeScore\nExample: GASO 21 APP 17");
+  if(cur===null || cur.trim()==="") return;
+  const p = cur.trim().split(/\s+/);
+  if(p.length<4 || isNaN(+p[1]) || isNaN(+p[3])){
+    alert("Couldn't read that. Use: awayAbbr awayScore homeAbbr homeScore\nExample: GASO 21 APP 17");
+    return;
+  }
+  const coach = (prompt("Coach / label for this game? (optional — leave blank)", "") || "").trim();
+  const r = await pwFetch("/api/finals","POST",{away:p[0],awayScore:p[1],home:p[2],homeScore:p[3],coach});
+  if(r) refresh();
 }
 
 async function clearAllFinals(){
