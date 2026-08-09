@@ -68,6 +68,12 @@ const normPair = (a, b) =>
   `${String(a || "").toLowerCase().replace(/[^a-z0-9]/g, "")}|${String(b || "").toLowerCase().replace(/[^a-z0-9]/g, "")}`;
 let misses = {}; // login -> consecutive checks where a scored stream was not live
 let lastRead = {}; // login -> last RAW ocr {away,home}, to confirm a real score correction
+let qPend = {}; // login -> { q, n } pending quarter awaiting multi-cycle confirmation
+// how many consecutive cycles a NEW quarter must be read before we commit to it.
+// One forward step (e.g. 3RD->4TH) is normal, so 2; a leap, a regression, or OT is
+// suspicious (usually a misread of the tiny quarter box), so demand 3.
+const QCONFIRM_STEP = Number(process.env.SCORE_QCONFIRM_STEP || 2);
+const QCONFIRM_JUMP = Number(process.env.SCORE_QCONFIRM_JUMP || 3);
 
 // login -> { away, home, awayScore, homeScore, quarter, clock, confidence, source, updatedAt, coach, team, startedAt }
 let scores = {};
@@ -83,6 +89,10 @@ export function initStore(dataDir) {
   finalsPath = path.join(dataDir, "finals.json");
   try { scores = JSON.parse(fs.readFileSync(storePath, "utf8")); } catch { scores = {}; }
   try { finals = JSON.parse(fs.readFileSync(finalsPath, "utf8")); } catch { finals = []; }
+  // Scores survive a restart, but the QUARTER must not: a stale/stuck quarter
+  // loaded from disk could fire a false 4th-quarter alert before live reads
+  // correct it. Null it out so the quarter is re-confirmed from scratch on air.
+  for (const k of Object.keys(scores)) { if (scores[k]) scores[k].quarter = null; }
 }
 function persist() {
   try { fs.writeFileSync(storePath, JSON.stringify(scores, null, 2)); } catch {}
@@ -217,6 +227,7 @@ export function setManual(login, data) {
 export function clearScore(login) {
   login = login.toLowerCase();
   delete scores[login];
+  delete qPend[login];
   persist();
 }
 
@@ -547,8 +558,23 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
               if (a == null || (prev.awayScore != null && a < prev.awayScore)) a = prev.awayScore;
               if (h == null || (prev.homeScore != null && h < prev.homeScore)) h = prev.homeScore;
             }
-            // quarter only advances
-            if (!q || (QRANK[q] || 0) < (QRANK[prev.quarter] || 0)) q = prev.quarter;
+            // Quarter changes require confirmation across CONSECUTIVE read cycles.
+            // A single misread of the tiny quarter box used to advance-and-stick,
+            // locking games in the 4th (false "4th quarter" alerts + frozen clock).
+            // Now any change — forward, a leap, or correcting a wrong/stuck value —
+            // must repeat for N cycles before we commit. Blank reads hold as-is.
+            if (!q) {
+              q = prev.quarter; qPend[login] = null;
+            } else if (q === prev.quarter) {
+              qPend[login] = null;
+            } else {
+              const cRank = QRANK[prev.quarter] || 0, rRank = QRANK[q] || 0;
+              const need = (rRank > cRank && (rRank - cRank) <= 1) ? QCONFIRM_STEP : QCONFIRM_JUMP;
+              const p = qPend[login];
+              qPend[login] = (p && p.q === q) ? { q, n: p.n + 1 } : { q, n: 1 };
+              if (qPend[login].n >= need) qPend[login] = null; // confirmed: adopt q
+              else q = prev.quarter;                           // hold until confirmed
+            }
             // Keep a verified team name locked against garbles — BUT release it when
             // the current read is ALSO a verified, DIFFERENT school (the opponent
             // genuinely changed, e.g. a new game within the same stream). Otherwise
@@ -556,6 +582,8 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
             const changed = (cur, locked) => resolveAny(cur) && resolveAny(cur) !== resolveAny(locked);
             if (resolveAny(prev.away) && !changed(away, prev.away)) away = prev.away;
             if (resolveAny(prev.home) && !changed(home, prev.home)) home = prev.home;
+          } else {
+            qPend[login] = null; // first read of a new game: no pending quarter carryover
           }
           const nowIso = new Date().toISOString();
           // Roll the whole-game history forward (reset it when a new game starts on
@@ -611,6 +639,7 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
     if (sc.dynastyConfirmed && (sc.awayScore != null || sc.homeScore != null)) archiveFinal(login, sc);
     delete scores[login];
     delete misses[login];
+    delete qPend[login];
   }
   persist();
 }
