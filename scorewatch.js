@@ -39,6 +39,13 @@ const GRAB_GAP_MS = Number(process.env.SCORE_GRAB_GAP_MS || 1000);
 // don't archive to Final until a live stream has been missing this many checks
 // (Twitch occasionally omits a live channel for one cycle)
 const ARCHIVE_AFTER_MISSES = Number(process.env.SCORE_ARCHIVE_AFTER_MISSES || 2);
+// Keep a rolling log of confident, complete readings for the WHOLE game so the
+// FINAL can be computed from the game's true peak (confirmed by several frames)
+// instead of the single last frame — which is often a replay/menu/postgame garble.
+const HISTORY_MIN_CONF = Number(process.env.SCORE_HISTORY_MIN_CONF || 0.4);
+const HISTORY_MAX = Number(process.env.SCORE_HISTORY_MAX || 80);
+// a scoreline must be seen in at least this many confident frames to be "confirmed"
+const FINAL_CONFIRM_VOTES = Number(process.env.SCORE_FINAL_CONFIRM_VOTES || 2);
 
 const QRANK = { "1ST": 1, "2ND": 2, "HALF": 2.5, "3RD": 3, "4TH": 4, "OT": 5, "FINAL": 6 };
 
@@ -97,13 +104,45 @@ export function getFinals() {
     .sort((a, b) => new Date(b.endedAt) - new Date(a.endedAt));
 }
 
-// move a stream's last score into the finals list (deduped by twitch+startedAt)
+// Derive the true final from the whole game's confident readings instead of the
+// single last frame. Football scores only go up, so each side's final is the
+// HIGHEST value that was confirmed by several frames — this rejects both a low
+// end-of-game garble (replay/menu/postgame 0-0) and a one-frame spurious spike.
+function confirmedFinal(sc) {
+  const hist = Array.isArray(sc.history) ? sc.history : [];
+  const settled = hist.filter(e => e && e.a != null && e.h != null);
+  // highest per-side value seen in >= FINAL_CONFIRM_VOTES frames
+  const pick = key => {
+    const counts = new Map();
+    for (const e of settled) counts.set(e[key], (counts.get(e[key]) || 0) + 1);
+    let best = null;
+    for (const [v, c] of counts) if (c >= FINAL_CONFIRM_VOTES && (best == null || v > best)) best = v;
+    return best;
+  };
+  let a = pick("a"), h = pick("h");
+  // Prefer a scoreline that actually co-occurred at the confirmed peak; otherwise
+  // fall back to the per-side confirmed maxes (they meet on the last real play).
+  // Thin history (short game / few confident reads) falls back to the live score.
+  if (a == null) a = sc.awayScore ?? null;
+  if (h == null) h = sc.homeScore ?? null;
+  // never report BELOW the last confirmed live score (it's the monotonic peak),
+  // but do let history override a live score that a late garble dragged down.
+  if (sc.awayScore != null && (a == null || sc.awayScore > a) && settled.length < FINAL_CONFIRM_VOTES) a = sc.awayScore;
+  if (sc.homeScore != null && (h == null || sc.homeScore > h) && settled.length < FINAL_CONFIRM_VOTES) h = sc.homeScore;
+  return { awayScore: a, homeScore: h, votes: settled.length };
+}
+
+// move a stream's game into the finals list (deduped by twitch+startedAt).
+// Uses the whole-game confirmed final, not just the last live reading.
 function archiveFinal(login, sc) {
   const id = `${login}_${sc.startedAt || ""}`;
+  const cf = confirmedFinal(sc);
+  console.log(`archive ${login}: final ${sc.away} ${cf.awayScore}-${cf.homeScore} ${sc.home} ` +
+    `(from ${cf.votes} confident reads; last live was ${sc.awayScore}-${sc.homeScore})`);
   const rec = {
     id, twitch: login, coach: sc.coach || login, team: sc.team || "",
     away: sc.away || null, home: sc.home || null,
-    awayScore: sc.awayScore ?? null, homeScore: sc.homeScore ?? null,
+    awayScore: cf.awayScore ?? null, homeScore: cf.homeScore ?? null,
     endedAt: new Date().toISOString(), source: sc.source || "cv",
   };
   const i = finals.findIndex(f => f.id === id);
@@ -518,9 +557,20 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
             if (resolveAny(prev.away) && !changed(away, prev.away)) away = prev.away;
             if (resolveAny(prev.home) && !changed(home, prev.home)) home = prev.home;
           }
+          const nowIso = new Date().toISOString();
+          // Roll the whole-game history forward (reset it when a new game starts on
+          // this stream). Log only FRESH complete, confident reads — the raw observed
+          // digits — so the final vote is over real observations, not carried-forward
+          // monotonic values. archiveFinal() later picks the confirmed peak from this.
+          let hist = (prev && prev.startedAt === (st.startedAt || null) && Array.isArray(prev.history)) ? prev.history : [];
+          if (complete(r) && (r.confidence ?? 0) >= HISTORY_MIN_CONF &&
+              resolveAny(r.away) && resolveAny(r.home)) {
+            hist = hist.concat([{ a: r.awayScore, h: r.homeScore, q: r.quarter || null, conf: r.confidence ?? 0, ts: nowIso }]);
+            if (hist.length > HISTORY_MAX) hist = hist.slice(-HISTORY_MAX);
+          }
           scores[login] = {
             ...r, away, home, awayScore: a, homeScore: h, quarter: q,
-            source: "cv", updatedAt: new Date().toISOString(),
+            source: "cv", updatedAt: nowIso, history: hist,
             coach: st.coach || null, team: st.team || null, startedAt: st.startedAt || null,
             dynastyConfirmed: !!confirmed,
           };
