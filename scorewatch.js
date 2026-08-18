@@ -25,9 +25,16 @@ const INTERVAL = Number(process.env.SCORE_SECONDS || 25) * 1000;
 const CONCURRENCY = Number(process.env.SCORE_CONCURRENCY || 1);
 const MIN_CONF = Number(process.env.SCORE_MIN_CONFIDENCE || 0.22);
 const FRAME_TTL = Number(process.env.SCORE_STALE_SECONDS || 120) * 1000;
-// grab up to N frames per read so a replay/menu/blurry moment doesn't lose the score
-// (stops early once a clean full read is found, so it's not always all N)
-const GRAB_ATTEMPTS = Number(process.env.SCORE_GRAB_ATTEMPTS || 5);
+// grab up to N frames per read so a replay/menu/blurry moment doesn't lose the score.
+// More frames = a stronger per-cycle vote (one garbled frame can't win a majority).
+const GRAB_ATTEMPTS = Number(process.env.SCORE_GRAB_ATTEMPTS || 8);
+// A read of a single game is only "stable" (eligible to be shown or to alert)
+// after this many complete reads AND this much elapsed time — so a game never
+// shows a score or fires an alert off the first noisy read.
+const STABLE_MIN_READS = Number(process.env.SCORE_STABLE_READS || 3);
+const STABLE_MIN_MS = Number(process.env.SCORE_STABLE_MS || 50000);
+// a quarter must repeat this many committed cycles before it counts as confirmed
+const QSTABLE_MIN = Number(process.env.SCORE_QSTABLE_MIN || 2);
 // When a score appears to RESET/drop mid-game, re-pull this many frames to
 // confidently re-sync to the true current score (loosens the "never drop" rule).
 const RESET_CONFIRM_FRAMES = Number(process.env.SCORE_RESET_FRAMES || 20);
@@ -69,6 +76,9 @@ const normPair = (a, b) =>
 let misses = {}; // login -> consecutive checks where a scored stream was not live
 let lastRead = {}; // login -> last RAW ocr {away,home}, to confirm a real score correction
 let qPend = {}; // login -> { q, n } pending quarter awaiting multi-cycle confirmation
+let namePend = {}; // login+side -> { v, n } pending team-name change awaiting confirmation
+// a locked team name only flips after a different school is read this many cycles
+const NAME_CONFIRM = Number(process.env.SCORE_NAME_CONFIRM || 2);
 // how many consecutive cycles a NEW quarter must be read before we commit to it.
 // One forward step (e.g. 3RD->4TH) is normal, so 2; a leap, a regression, or OT is
 // suspicious (usually a misread of the tiny quarter box), so demand 3.
@@ -89,10 +99,16 @@ export function initStore(dataDir) {
   finalsPath = path.join(dataDir, "finals.json");
   try { scores = JSON.parse(fs.readFileSync(storePath, "utf8")); } catch { scores = {}; }
   try { finals = JSON.parse(fs.readFileSync(finalsPath, "utf8")); } catch { finals = []; }
-  // Scores survive a restart, but the QUARTER must not: a stale/stuck quarter
-  // loaded from disk could fire a false 4th-quarter alert before live reads
-  // correct it. Null it out so the quarter is re-confirmed from scratch on air.
-  for (const k of Object.keys(scores)) { if (scores[k]) scores[k].quarter = null; }
+  // Scores survive a restart, but the volatile game STATE must not: a stale/stuck
+  // quarter or "confirmed" flag from disk could fire a false alert before live
+  // reads catch up. Reset them so the quarter and confirmation rebuild on air.
+  for (const k of Object.keys(scores)) {
+    if (!scores[k]) continue;
+    scores[k].quarter = null;
+    scores[k].qStableN = 0;
+    scores[k].qConfirmed = false;
+    scores[k].confirmed = false;
+  }
 }
 function persist() {
   try { fs.writeFileSync(storePath, JSON.stringify(scores, null, 2)); } catch {}
@@ -139,7 +155,18 @@ function confirmedFinal(sc) {
   // but do let history override a live score that a late garble dragged down.
   if (sc.awayScore != null && (a == null || sc.awayScore > a) && settled.length < FINAL_CONFIRM_VOTES) a = sc.awayScore;
   if (sc.homeScore != null && (h == null || sc.homeScore > h) && settled.length < FINAL_CONFIRM_VOTES) h = sc.homeScore;
-  return { awayScore: a, homeScore: h, votes: settled.length };
+  // Team NAME by whole-game majority, not the last frame: a garbled end-of-game
+  // read that fuzzy-resolved to a real school (e.g. Texas State -> Tennessee) and
+  // released the name-lock can't win against hundreds of correct reads.
+  const modeName = key => {
+    const counts = new Map();
+    for (const e of hist) { const v = e && e[key]; if (v) counts.set(v, (counts.get(v) || 0) + 1); }
+    let best = null, bc = 0;
+    for (const [v, c] of counts) if (c > bc) { bc = c; best = v; }
+    return best;
+  };
+  const away = modeName("aw"), home = modeName("hm");
+  return { awayScore: a, homeScore: h, away, home, votes: settled.length };
 }
 
 // move a stream's game into the finals list (deduped by twitch+startedAt).
@@ -147,11 +174,13 @@ function confirmedFinal(sc) {
 function archiveFinal(login, sc) {
   const id = `${login}_${sc.startedAt || ""}`;
   const cf = confirmedFinal(sc);
-  console.log(`archive ${login}: final ${sc.away} ${cf.awayScore}-${cf.homeScore} ${sc.home} ` +
-    `(from ${cf.votes} confident reads; last live was ${sc.awayScore}-${sc.homeScore})`);
+  const away = cf.away || sc.away || null;   // whole-game majority name, else last live
+  const home = cf.home || sc.home || null;
+  console.log(`archive ${login}: final ${away} ${cf.awayScore}-${cf.homeScore} ${home} ` +
+    `(from ${cf.votes} confident reads; last live name was ${sc.away}/${sc.home}, score ${sc.awayScore}-${sc.homeScore})`);
   const rec = {
     id, twitch: login, coach: sc.coach || login, team: sc.team || "",
-    away: sc.away || null, home: sc.home || null,
+    away, home,
     awayScore: cf.awayScore ?? null, homeScore: cf.homeScore ?? null,
     endedAt: new Date().toISOString(), source: sc.source || "cv",
   };
@@ -228,6 +257,7 @@ export function clearScore(login) {
   login = login.toLowerCase();
   delete scores[login];
   delete qPend[login];
+  delete namePend[login + "|a"]; delete namePend[login + "|h"];
   persist();
 }
 
@@ -305,7 +335,10 @@ function consensus(reads) {
   const clk = modeOf(ok.map(r => r.clock));
   const dd = modeOf(ok.map(r => r.downDistance));
   const poss = modeOf(ok.map(r => r.possession));
-  const trust = m => (ok.length >= 3 && m.count < 2) ? null : m.val;
+  // A score is only trusted when it wins a MAJORITY of the frames we read this
+  // cycle (and at least 2). With 8 frames a lone garble frame can't set a score.
+  const need = Math.max(2, Math.ceil(ok.length / 2));
+  const trust = m => (ok.length >= 3 ? (m.count >= need ? m.val : null) : m.val);
   const agree = ((aS.count || 0) + (hS.count || 0)) / (2 * Math.max(1, ok.length));
   const rawConf = Math.max(0, ...ok.map(r => r.confidence || 0));
   return {
@@ -428,7 +461,10 @@ async function fireGameAlerts(liveByLogin) {
   const games = new Map(); // key -> { rep, streams:[{coach,url}] }
   for (const [login, st] of liveByLogin) {
     const sc = scores[login];
-    if (!sc || !sc.dynastyConfirmed) continue;  // only real, confirmed dynasty games
+    // Only real, confirmed dynasty games with a STABLE, confirmed state. This is
+    // the guard that prevents a close-game/4th alert firing off the first read
+    // before the score and quarter have settled.
+    if (!sc || !sc.dynastyConfirmed || !sc.confirmed) continue;
     const key = matchupKey(sc);
     let g = games.get(key);
     if (!g) { g = { rep: sc, streams: [] }; games.set(key, g); }
@@ -575,15 +611,26 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
               if (qPend[login].n >= need) qPend[login] = null; // confirmed: adopt q
               else q = prev.quarter;                           // hold until confirmed
             }
-            // Keep a verified team name locked against garbles — BUT release it when
-            // the current read is ALSO a verified, DIFFERENT school (the opponent
-            // genuinely changed, e.g. a new game within the same stream). Otherwise
-            // a stale lock shows the wrong team (e.g. "Arkansas" when it's Houston).
-            const changed = (cur, locked) => resolveAny(cur) && resolveAny(cur) !== resolveAny(locked);
-            if (resolveAny(prev.away) && !changed(away, prev.away)) away = prev.away;
-            if (resolveAny(prev.home) && !changed(home, prev.home)) home = prev.home;
+            // Keep a verified team name locked against garbles. Release it only when
+            // a DIFFERENT verified school is read in TWO consecutive cycles (a real
+            // opponent change, e.g. "Arkansas" -> "Houston"), so a single end-of-game
+            // garble can't flip a locked name (e.g. Texas State -> Tennessee).
+            const holdLock = (sideKey, cur, locked) => {
+              const lk = resolveAny(locked);
+              if (!lk) return cur;                       // nothing locked yet
+              const rc = resolveAny(cur);
+              const k = login + sideKey;
+              if (!rc || rc === lk) { namePend[k] = null; return locked; } // same/garble: keep
+              const p = namePend[k];
+              namePend[k] = (p && p.v === rc) ? { v: rc, n: p.n + 1 } : { v: rc, n: 1 };
+              if (namePend[k].n >= NAME_CONFIRM) { namePend[k] = null; return cur; } // confirmed change
+              return locked;                             // hold lock until confirmed
+            };
+            away = holdLock("|a", away, prev.away);
+            home = holdLock("|h", home, prev.home);
           } else {
-            qPend[login] = null; // first read of a new game: no pending quarter carryover
+            // first read of a new game: no pending quarter/name carryover
+            qPend[login] = null; delete namePend[login + "|a"]; delete namePend[login + "|h"];
           }
           const nowIso = new Date().toISOString();
           // Roll the whole-game history forward (reset it when a new game starts on
@@ -593,14 +640,34 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
           let hist = (prev && prev.startedAt === (st.startedAt || null) && Array.isArray(prev.history)) ? prev.history : [];
           if (complete(r) && (r.confidence ?? 0) >= HISTORY_MIN_CONF &&
               resolveAny(r.away) && resolveAny(r.home)) {
-            hist = hist.concat([{ a: r.awayScore, h: r.homeScore, q: r.quarter || null, conf: r.confidence ?? 0, ts: nowIso }]);
+            // store the confirmed/locked display names so the FINAL name is decided
+            // by whole-game majority, not the last (possibly garbled) frame.
+            hist = hist.concat([{ a: r.awayScore, h: r.homeScore, aw: away, hm: home,
+              q: r.quarter || null, conf: r.confidence ?? 0, ts: nowIso }]);
             if (hist.length > HISTORY_MAX) hist = hist.slice(-HISTORY_MAX);
           }
+          // --- STABILITY / CONFIRMATION -------------------------------------
+          // A game must be read consistently for a few cycles before we treat its
+          // state as real. This is what stops "score/quarter/alert off the first
+          // noisy read": the UI shows "Reading…" and no alert fires until stable.
+          const sameGame = prev && prev.startedAt === (st.startedAt || null);
+          const firstSeenAt = sameGame ? (prev.firstSeenAt || nowIso) : nowIso;
+          let goodReads = sameGame ? (prev.goodReads || 0) : 0;
+          if (complete(r)) goodReads += 1;
+          // quarter must persist as the SAME committed value for a few cycles
+          let qStableN = (sameGame && q && q === prev.quarter) ? (prev.qStableN || 0) + 1 : 1;
+          const ageMs = Date.now() - new Date(firstSeenAt).getTime();
+          const namesOK = !!(resolveAny(away) && resolveAny(home));
+          const stable = goodReads >= STABLE_MIN_READS && ageMs >= STABLE_MIN_MS && a != null && h != null;
+          const qConfirmed = !!q && qStableN >= QSTABLE_MIN;
+          const stateConfirmed = stable && qConfirmed && namesOK;
           scores[login] = {
             ...r, away, home, awayScore: a, homeScore: h, quarter: q,
             source: "cv", updatedAt: nowIso, history: hist,
             coach: st.coach || null, team: st.team || null, startedAt: st.startedAt || null,
             dynastyConfirmed: !!confirmed,
+            firstSeenAt, goodReads, qStableN,
+            stable, qConfirmed, confirmed: stateConfirmed,
           };
         }
         // if not ok (menu/replay), we keep the last reading; staleness handled on read
@@ -636,10 +703,13 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
     misses[login] = (misses[login] || 0) + 1;
     if (misses[login] < ARCHIVE_AFTER_MISSES) continue;
     const sc = scores[login];
-    if (sc.dynastyConfirmed && (sc.awayScore != null || sc.homeScore != null)) archiveFinal(login, sc);
+    // Only archive games we actually locked onto (confirmed dynasty + a stable
+    // read at some point) so a brief garbled sighting never becomes a "final".
+    if (sc.dynastyConfirmed && sc.stable && (sc.awayScore != null || sc.homeScore != null)) archiveFinal(login, sc);
     delete scores[login];
     delete misses[login];
     delete qPend[login];
+    delete namePend[login + "|a"]; delete namePend[login + "|h"];
   }
   persist();
 }
