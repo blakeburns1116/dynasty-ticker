@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dynasty Ticker</title>
+<style>
+  :root {
+    --bg:#0d1117; --card:#161b22; --line:#21262d; --text:#e6edf3;
+    --muted:#8b949e; --accent:#f85149; --live:#3fb950; --dim:#30363d; --gold:#e3b341;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:15px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  header { padding:18px 20px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  h1 { font-size:20px; margin:0; letter-spacing:.3px; }
+  .pill { font-size:12px; color:var(--muted); }
+  .live-dot { width:9px; height:9px; border-radius:50%; background:var(--live);
+    display:inline-block; margin-right:5px; animation:pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  nav { display:flex; gap:6px; padding:12px 20px 0; }
+  nav button { background:none; border:1px solid var(--line); color:var(--muted);
+    padding:8px 14px; border-radius:8px 8px 0 0; cursor:pointer; font-size:14px; }
+  nav button.active { background:var(--card); color:var(--text); border-bottom-color:var(--card); }
+  main { padding:16px 20px 40px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .card.on a { color:var(--live); }
+  .card h3 { margin:0 0 2px; font-size:16px; }
+  .card .team { color:var(--muted); font-size:13px; }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px;
+    border:1px solid var(--line); color:var(--muted); margin-top:8px; }
+  .tag.dyn { color:var(--live); border-color:var(--live); }
+  .tag.off { color:var(--gold); border-color:var(--gold); }
+  .title { color:var(--muted); font-size:13px; margin:8px 0 0; }
+  .meta { display:flex; gap:14px; margin-top:10px; font-size:13px; color:var(--muted); }
+  a { color:var(--text); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); font-size:14px; }
+  th { color:var(--muted); font-weight:600; }
+  .bar { height:8px; background:var(--dim); border-radius:6px; overflow:hidden; min-width:80px; }
+  .bar > span { display:block; height:100%; background:var(--live); }
+  .no { color:var(--accent); } .yes { color:var(--live); }
+  .empty { color:var(--muted); padding:30px 0; text-align:center; }
+  .mu { display:flex; align-items:center; justify-content:space-between; }
+  .mu .side { flex:1; } .mu .side.r { text-align:right; }
+  .vs { color:var(--muted); padding:0 12px; font-size:12px; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:20px; margin-left:8px; }
+  .badge.done { background:rgba(63,185,80,.15); color:var(--live); }
+  .badge.wait { background:rgba(139,148,158,.15); color:var(--muted); }
+  footer { color:var(--muted); font-size:12px; padding:0 20px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏈 Dynasty Ticker</h1>
+  <span class="pill" id="status">connecting…</span>
+</header>
+<nav>
+  <button data-tab="live" class="active">Live now</button>
+  <button data-tab="weekly">Weekly activity</button>
+  <button data-tab="schedule">Schedule</button>
+</nav>
+<main>
+  <section id="live"></section>
+  <section id="weekly" hidden></section>
+  <section id="schedule" hidden></section>
+</main>
+<footer>Auto-refreshes every 30s. Green = playing the dynasty right now.</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const tabs = ["live","weekly","schedule"];
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
+  tabs.forEach(t => $("#"+t).hidden = t !== b.dataset.tab);
+});
+
+const fmtAgo = iso => {
+  if (!iso) return "—";
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return m + "m";
+  const h = Math.floor(m/60); return h + "h " + (m%60) + "m";
+};
+const esc = s => (s||"").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+async function renderLive() {
+  const d = await (await fetch("/api/live")).json();
+  $("#status").innerHTML = d.streams.length
+    ? `<span class="live-dot"></span>${d.streams.length} live · updated ${fmtAgo(d.updatedAt)} ago`
+    : `no one live · updated ${fmtAgo(d.updatedAt)} ago`;
+  const on = d.streams.filter(s => s.onDynasty).length;
+  if (!d.streams.length) { $("#live").innerHTML = `<div class="empty">Nobody's streaming right now. Check back later.</div>`; return; }
+  const sorted = [...d.streams].sort((a,b) => (b.onDynasty - a.onDynasty) || (b.viewers - a.viewers));
+  $("#live").innerHTML = `<p class="pill" style="margin:4px 0 14px">${on} playing the dynasty, ${d.streams.length - on} streaming something else</p><div class="grid">` +
+    sorted.map(s => `
+      <div class="card ${s.onDynasty ? "on" : ""}">
+        <h3><a href="${s.url}" target="_blank">${esc(s.coach)}</a></h3>
+        <div class="team">${esc(s.team)} · @${esc(s.twitch)}</div>
+        <span class="tag ${s.onDynasty ? "dyn" : "off"}">${s.onDynasty ? "● On dynasty" : "○ " + esc(s.game || "Other")}</span>
+        <p class="title">${esc(s.title)}</p>
+        <div class="meta"><span>👁 ${s.viewers}</span><span>⏱ live ${fmtAgo(s.startedAt)}</span></div>
+      </div>`).join("") + `</div>`;
+}
+
+async function renderWeekly() {
+  const d = await (await fetch("/api/weekly")).json();
+  const max = Math.max(60, ...d.activity.map(a => a.minutes));
+  const rows = d.activity.map(a => `
+    <tr>
+      <td>${esc(a.coach)}<div class="team">${esc(a.team)}</div></td>
+      <td class="${a.played ? "yes" : "no"}">${a.played ? "Played" : "Not yet"}</td>
+      <td>${a.sessions}</td>
+      <td><div class="bar"><span style="width:${Math.round(a.minutes/max*100)}%"></span></div>${a.minutes}m</td>
+      <td>${fmtAgo(a.lastSeen)}</td>
+    </tr>`).join("");
+  const behind = d.activity.filter(a => !a.played).map(a => a.coach);
+  $("#weekly").innerHTML = `
+    <p class="pill" style="margin:4px 0 14px">Week ${d.week}${d.seasonYear ? " · "+d.seasonYear : ""} — ${d.activity.filter(a=>a.played).length}/${d.activity.length} have played${behind.length ? " · behind: " + behind.map(esc).join(", ") : ""}</p>
+    <table><thead><tr><th>Coach</th><th>Status</th><th>Sessions</th><th>Time on dynasty</th><th>Last seen</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function renderSchedule() {
+  const w = await (await fetch("/api/weekly")).json();
+  if (!w.matchups.length) { $("#schedule").innerHTML = `<div class="empty">No matchups set. Edit schedule.json.</div>`; return; }
+  $("#schedule").innerHTML = `<p class="pill" style="margin:4px 0 14px">Week ${w.week} slate — progress inferred from who has streamed</p>` +
+    w.matchups.map(m => `
+      <div class="card mu" style="margin-bottom:10px">
+        <span class="side ${m.homePlayed ? "yes":""}">${esc(m.home)}</span>
+        <span class="vs">vs</span>
+        <span class="side r ${m.awayPlayed ? "yes":""}">${esc(m.away)}</span>
+        <span class="badge ${m.likelyPlayed ? "done":"wait"}">${m.likelyPlayed ? "✓ likely played" : "waiting"}</span>
+      </div>`).join("");
+}
+
+async function refresh() {
+  try { await Promise.all([renderLive(), renderWeekly(), renderSchedule()]); }
+  catch (e) { $("#status").textContent = "error: " + e.message; }
+}
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
