@@ -14,7 +14,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { scoreConfirmsTeam, resolveTeam, resolveAny } from "./teams.js";
+import { scoreConfirmsTeam, confirmDynasty, resolveTeam, resolveAny } from "./teams.js";
 
 const execFileP = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -182,7 +182,7 @@ function archiveFinal(login, sc) {
   console.log(`archive ${login}: final ${away} ${cf.awayScore}-${cf.homeScore} ${home} ` +
     `(from ${cf.votes} confident reads; last live name was ${sc.away}/${sc.home}, score ${sc.awayScore}-${sc.homeScore})`);
   const rec = {
-    id, twitch: login, coach: sc.coach || login, team: sc.team || "",
+    id, twitch: login, coach: sc.coach || login, team: sc.team || "", dynasty: sc.dynasty || null,
     away, home,
     awayScore: cf.awayScore ?? null, homeScore: cf.homeScore ?? null,
     endedAt: new Date().toISOString(), source: sc.source || "cv",
@@ -201,7 +201,7 @@ export function addFinal(data) {
   const id = data.id || `add_${key(away)}_${key(home)}`;
   const rec = {
     id, twitch: data.twitch || id,
-    coach: data.coach || "", team: data.team || "",
+    coach: data.coach || "", team: data.team || "", dynasty: data.dynasty || null,
     away, home, awayScore: num(data.awayScore), homeScore: num(data.homeScore),
     endedAt: new Date().toISOString(), source: "manual",
   };
@@ -218,6 +218,7 @@ export function editFinal(id, data) {
   if (data.home !== undefined) f.home = data.home || null;
   if (data.awayScore !== undefined) f.awayScore = num(data.awayScore);
   if (data.homeScore !== undefined) f.homeScore = num(data.homeScore);
+  if (data.dynasty !== undefined) f.dynasty = data.dynasty || null;
   f.source = "manual";
   persistFinals();
   return f;
@@ -249,6 +250,7 @@ export function setManual(login, data) {
     updatedAt: new Date().toISOString(),
     coach: data.coach ?? prev.coach ?? null,
     team: prev.team ?? null,
+    dynasty: data.dynasty ?? prev.dynasty ?? null,
     startedAt: prev.startedAt ?? null,
     dynastyConfirmed: true, // a human entering a score vouches it's this dynasty
   };
@@ -571,8 +573,13 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
         if (acceptable(r)) {
           const st = liveByLogin.get(login) || {};
           const prev = scores[login];
-          // sticky: once a read shows their team, stay confirmed for the session
-          const confirmed = prev?.dynastyConfirmed || scoreConfirmsTeam(r, st.team);
+          // sticky: once a read shows one of the coach's teams, stay confirmed for
+          // the session and lock in which dynasty (rebuild vs fivestar) this game
+          // is, plus which of the coach's two teams is on screen.
+          const match = confirmDynasty(r, st.teams);
+          const confirmed = prev?.dynastyConfirmed || !!match;
+          const dynasty = prev?.dynasty || (match ? match.dynasty : null);
+          const teamName = prev?.team || (match ? match.team : (st.team || null));
           let a = r.awayScore, h = r.homeScore, q = r.quarter;
           let away = r.away, home = r.home;
           if (prev && prev.startedAt === (st.startedAt || null)) {
@@ -667,7 +674,7 @@ export async function updateScores(liveStreams, { frameFor } = {}) {
           scores[login] = {
             ...r, away, home, awayScore: a, homeScore: h, quarter: q,
             source: "cv", updatedAt: nowIso, history: hist,
-            coach: st.coach || null, team: st.team || null, startedAt: st.startedAt || null,
+            coach: st.coach || null, team: teamName, dynasty, startedAt: st.startedAt || null,
             dynastyConfirmed: !!confirmed,
             firstSeenAt, goodReads, qStableN,
             stable, qConfirmed, confirmed: stateConfirmed,

@@ -30,6 +30,32 @@ export const TEAM_ALIASES = {
   "UTSA":                 ["utsa", "texas san antonio", "texas-san antonio"],
   "Washington State":     ["washington state", "wazzu", "wash state", "wash st", "wsu"],
   "Wyoming":              ["wyoming", "wyo"],
+
+  // --- 5-star dynasty ("5 Stars") roster teams. Order matters: the more specific
+  // Texas schools are listed before "Texas" so a read of "TEXAS A&M"/"TEXAS TECH"
+  // resolves to them, not to Texas. Miami (OH) is defined above, before "Miami".
+  "Ohio State":     ["ohio state", "ohiostate", "ohio st", "osu"],
+  "Ole Miss":       ["ole miss", "olemiss", "mississippi"],
+  "Indiana":        ["indiana", "ind"],
+  "Clemson":        ["clemson", "clem"],
+  "Georgia":        ["georgia", "uga"],
+  "Texas A&M":      ["texas a&m", "texas am", "texasam", "tamu", "texas a and m"],
+  "Texas Tech":     ["texas tech", "texastech", "ttu"],
+  "Florida":        ["florida", "fla", "uf"],
+  "SMU":            ["smu", "southern methodist"],
+  "Oklahoma":       ["oklahoma", "okla", "ou"],
+  "Nebraska":       ["nebraska", "neb", "huskers"],
+  "USC":            ["usc", "southern cal", "southern california"],
+  "Alabama":        ["alabama", "bama", "ala", "crimson tide"],
+  "Notre Dame":     ["notre dame", "notredame", "irish", "nd"],
+  "Michigan":       ["michigan", "mich"],
+  "Miami":          ["miami", "miami fl", "miamifl", "hurricanes", "canes"],
+  "Florida State":  ["florida state", "floridastate", "fla state", "fla st", "fsu"],
+  "LSU":            ["lsu", "louisiana state"],
+  "Oregon":         ["oregon", "ore", "ducks"],
+  "Penn State":     ["penn state", "pennstate", "penn st", "psu"],
+  "Tennessee":      ["tennessee", "tenn", "vols"],
+  "Texas":          ["texas", "longhorns", "tex"],
 };
 
 // lowercase, drop punctuation AND spaces so "BALLSTATE" matches "ball state"
@@ -78,6 +104,19 @@ export function matchesTeam(ocrText, teamName) {
 export function scoreConfirmsTeam(score, teamName) {
   if (!score) return false;
   return matchesTeam(score.away, teamName) || matchesTeam(score.home, teamName);
+}
+
+// A coach now has a team in each dynasty ({ rebuild, fivestar }). Since the two
+// are always different schools, the team on the scoreboard tells us which league
+// this stream is. Returns { dynasty, team } for the first assigned team that
+// appears on the bug, or null if neither has been read yet.
+export function confirmDynasty(score, teams) {
+  if (!score || !teams) return null;
+  for (const dynasty of ["rebuild", "fivestar"]) {
+    const team = teams[dynasty];
+    if (team && scoreConfirmsTeam(score, team)) return { dynasty, team };
+  }
+  return null;
 }
 
 // Every other FBS school (normalized), so the server can tell when an OCR'd name

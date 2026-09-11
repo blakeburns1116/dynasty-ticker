@@ -41,7 +41,9 @@ const readJson = (f, fallback) => {
   catch { return fallback; }
 };
 const getMembers = () => readJson("members.json", { members: [] }).members;
-const getSchedule = () => readJson("schedule.json", { week: 0, matchups: [] });
+// schedule.json is now keyed by dynasty: { rebuild: {week, seasonYear, matchups}, fivestar: {...} }.
+const getSchedule = () => readJson("schedule.json", {});
+const getScheduleFor = (dyn) => getSchedule()[dyn] || { week: 0, seasonYear: null, matchups: [] };
 const getStandings = () => readJson("standings.json", { teams: {} });
 
 // ---------- session log (append-only JSON) ----------
@@ -101,7 +103,6 @@ async function poll() {
     const byLogin = new Map(members.map(m => [m.twitch.toLowerCase(), m]));
     const raw = await fetchLiveStreams([...byLogin.keys()]);
     const now = new Date().toISOString();
-    const week = getSchedule().week;
 
     const streams = raw.map(s => {
       const m = byLogin.get((s.user_login || "").toLowerCase()) || {};
@@ -114,7 +115,10 @@ async function poll() {
         twitch: s.user_login,
         displayName: s.user_name,
         coach: m.coach || s.user_name,
-        team: m.team || "",
+        // A coach now has two teams (one per dynasty). Which one this stream is
+        // gets resolved from the scoreboard, so leave team blank until then.
+        teams: m.teams || {},
+        team: "",
         game: s.game_name || "",
         title: s.title || "",
         viewers: s.viewer_count || 0,
@@ -126,7 +130,7 @@ async function poll() {
     });
 
     liveSnapshot = { updatedAt: now, streams };
-    logSessions(streams, now, week);
+    logSessions(streams, now);
     console.log(`[${now}] ${streams.length} live (${streams.filter(s => s.onDynasty).length} on dynasty)`);
   } catch (e) {
     console.error("Poll failed:", e.message);
@@ -136,18 +140,28 @@ async function poll() {
 // Merge current live streams into the append-only session log.
 // A session = a continuous stream. We match on twitch+startedAt so a single
 // stream is one row whose lastSeen keeps advancing while they're live.
-function logSessions(streams, now, week) {
+function logSessions(streams, now) {
   const rows = readLog();
+  // The league a stream belongs to comes from the scoreboard read, which the
+  // score loop resolves. Read the latest resolved dynasty/team for each stream;
+  // it may be null early (before the bug is read) and get backfilled next poll.
+  const liveScores = scorewatch.getScores();
   for (const s of streams) {
     if (GAME_NAME && !s.onDynasty) continue; // only log dynasty play
+    const sc = liveScores[s.twitch.toLowerCase()];
+    const dynasty = (sc && sc.dynasty) || null;
+    const team = (sc && sc.team) || s.team || "";
+    const week = dynasty ? (getScheduleFor(dynasty).week ?? null) : null;
     const key = r => r.twitch === s.twitch && r.startedAt === s.startedAt;
     let row = rows.find(key);
     if (row) {
       row.lastSeen = now;
       row.title = s.title;
+      // once the scoreboard tells us the league, fill it in on the session
+      if (!row.dynasty && dynasty) { row.dynasty = dynasty; row.week = week; row.team = team; }
     } else {
       rows.push({
-        twitch: s.twitch, coach: s.coach, team: s.team, game: s.game,
+        twitch: s.twitch, coach: s.coach, team, game: s.game, dynasty,
         title: s.title, startedAt: s.startedAt, lastSeen: now, week
       });
     }
@@ -156,26 +170,27 @@ function logSessions(streams, now, week) {
 }
 
 // ---------- weekly rollup ----------
-function weeklyRollup() {
+function weeklyRollup(dynasty) {
   const rows = readLog();
-  const members = getMembers();
-  const schedule = getSchedule();
+  // Only coaches who have a team in THIS league appear in its weekly table.
+  const members = getMembers().filter(m => m.teams && m.teams[dynasty]);
+  const schedule = getScheduleFor(dynasty);
   const week = schedule.week;
 
-  // Per-coach totals for the current week.
+  // Per-coach totals for the current week, in this league only.
   const stat = new Map();
   const ensure = c => stat.get(c) || stat.set(c, { coach: c, sessions: 0, minutes: 0, lastSeen: null }).get(c);
-  for (const r of rows.filter(r => r.week === week)) {
+  for (const r of rows.filter(r => r.dynasty === dynasty && r.week === week)) {
     const s = ensure(r.coach);
     s.sessions += 1;
     s.minutes += Math.max(0, Math.round((new Date(r.lastSeen) - new Date(r.startedAt)) / 60000));
     if (!s.lastSeen || r.lastSeen > s.lastSeen) s.lastSeen = r.lastSeen;
   }
 
-  // Everyone in the dynasty, even those who haven't played, so "who's behind" is visible.
+  // Everyone in this league, even those who haven't played, so "who's behind" is visible.
   const activity = members.map(m => {
     const s = stat.get(m.coach) || { sessions: 0, minutes: 0, lastSeen: null };
-    return { coach: m.coach, team: m.team, twitch: m.twitch, ...s, played: s.sessions > 0 };
+    return { coach: m.coach, team: m.teams[dynasty], twitch: m.twitch, ...s, played: s.sessions > 0 };
   }).sort((a, b) => b.minutes - a.minutes);
 
   // Matchup progress: a game is "likely played" when both sides have logged play this week.
@@ -186,7 +201,7 @@ function weeklyRollup() {
     return { ...mu, homePlayed, awayPlayed, likelyPlayed: homePlayed && awayPlayed };
   });
 
-  return { week, seasonYear: schedule.seasonYear, activity, matchups };
+  return { dynasty, week, seasonYear: schedule.seasonYear, activity, matchups };
 }
 
 // ---------- mock data for a keyless test drive ----------
@@ -198,7 +213,7 @@ function mockStreams(logins) {
     user_login: login,
     user_name: login,
     game_name: i === pick.length - 1 ? "Just Chatting" : g, // one off-game to show filtering
-    title: i === pick.length - 1 ? "hanging out" : `Dynasty Week ${getSchedule().week} — rivalry game`,
+    title: i === pick.length - 1 ? "hanging out" : `Dynasty Week ${getScheduleFor("rebuild").week || 1} — rivalry game`,
     viewer_count: 5 + i * 3,
     started_at: startedAgo(20 + i * 15),
     thumbnail_url: ""
@@ -259,8 +274,16 @@ app.get("/api/test-alert", async (req, res) => {
   if (req.query.key !== "gameday") return res.status(403).json({ error: "bad key" });
   res.json(await scorewatch.sendTestAlert());
 });
-app.get("/api/weekly", (_req, res) => res.json(weeklyRollup()));
-app.get("/api/schedule", (_req, res) => res.json(getSchedule()));
+// ?dynasty=rebuild|fivestar for one league; omit for both.
+app.get("/api/weekly", (req, res) => {
+  const d = req.query.dynasty;
+  if (d) return res.json(weeklyRollup(d));
+  res.json({ rebuild: weeklyRollup("rebuild"), fivestar: weeklyRollup("fivestar") });
+});
+app.get("/api/schedule", (req, res) => {
+  const d = req.query.dynasty;
+  res.json(d ? getScheduleFor(d) : getSchedule());
+});
 app.get("/api/members", (_req, res) => res.json({ members: getMembers() }));
 app.get("/api/standings", (_req, res) => res.json(getStandings()));
 
