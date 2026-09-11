@@ -1,0 +1,31 @@
+{
+  "_comment": "One entry per coach. twitch = exact Twitch login (lowercase). teams = the coach's team in each dynasty: 'rebuild' (2-star) and 'fivestar' (5-star). Omit a dynasty key if the coach isn't in that league. Dynasty of a live stream is derived from whichever assigned team the scoreboard shows.",
+  "members": [
+    { "twitch": "justrent5",        "coach": "Trent",   "teams": { "rebuild": "App State",            "fivestar": "Ole Miss" } },
+    { "twitch": "thesummersmine",   "coach": "TSM13",   "teams": { "rebuild": "Ball State",           "fivestar": "Indiana" } },
+    { "twitch": "competegaming777", "coach": "James",   "teams": { "rebuild": "Coastal Carolina",     "fivestar": "Ohio State" } },
+    { "twitch": "curtskirt",        "coach": "Curtis",  "teams": { "rebuild": "Colorado State",       "fivestar": "Clemson" } },
+    { "twitch": "shorterinperson",  "coach": "Ralph",   "teams": { "rebuild": "East Carolina",        "fivestar": "Georgia" } },
+    { "twitch": "karakter4",        "coach": "AK",      "teams": { "rebuild": "Florida Atlantic",     "fivestar": "Texas Tech" } },
+    { "twitch": "bcburns16",        "coach": "Blake",   "teams": { "rebuild": "Florida International", "fivestar": "Texas A&M" } },
+    { "twitch": "mwhippertv",       "coach": "Marcus",  "teams": { "rebuild": "Fresno State",         "fivestar": "Florida" } },
+    { "twitch": "iam_jaja",         "coach": "Sherif",  "teams": { "rebuild": "Georgia Southern",     "fivestar": "SMU" } },
+    { "twitch": "digsby06",         "coach": "T",       "teams": { "rebuild": "Jacksonville State",   "fivestar": "Oklahoma" } },
+    { "twitch": "xroncx",           "coach": "Ron",     "teams": { "rebuild": "JMU",                  "fivestar": "Nebraska" } },
+    { "twitch": "elitenrgy",        "coach": "Ian",     "teams": { "rebuild": "Liberty",              "fivestar": "USC" } },
+    { "twitch": "jabolden2",        "coach": "Jeff",    "teams": { "rebuild": "Louisiana",            "fivestar": "Alabama" } },
+    { "twitch": "thephamousog",     "coach": "Tuck",    "teams": { "rebuild": "Miami (OH)" } },
+    { "twitch": "daboyboytwone",    "coach": "Twone",   "teams": { "rebuild": "Rice",                 "fivestar": "Texas" } },
+    { "twitch": "tevg_32",          "coach": "Tev",     "teams": { "rebuild": "San Jose State",       "fivestar": "Notre Dame" } },
+    { "twitch": "d_cape_15",        "coach": "Dee",     "teams": { "rebuild": "Southern Miss",        "fivestar": "Michigan" } },
+    { "twitch": "vigilaante_",      "coach": "Dwayne",  "teams": { "rebuild": "Temple",               "fivestar": "Miami" } },
+    { "twitch": "genes1s_1906",     "coach": "Rashaan", "teams": { "rebuild": "Texas State",          "fivestar": "Florida State" } },
+    { "twitch": "papidchulo24",     "coach": "Iris",    "teams": { "rebuild": "Toledo" } },
+    { "twitch": "d_carter1",        "coach": "DC",      "teams": { "rebuild": "Tulane",               "fivestar": "Washington" } },
+    { "twitch": "ohio_ap",          "coach": "AP",      "teams": { "rebuild": "Tulsa",                "fivestar": "LSU" } },
+    { "twitch": "alexlee1518",      "coach": "Alex",    "teams": { "rebuild": "Utah State",           "fivestar": "Oregon" } },
+    { "twitch": "draywashington",   "coach": "Dray",    "teams": { "rebuild": "UTSA",                 "fivestar": "Penn State" } },
+    { "twitch": "jlee1216",         "coach": "Justin",  "teams": { "rebuild": "Washington State" } },
+    { "twitch": "bjpetty138",       "coach": "BJ",      "teams": { "rebuild": "Wyoming",              "fivestar": "Tennessee" } }
+  ]
+}

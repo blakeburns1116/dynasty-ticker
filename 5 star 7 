@@ -1,0 +1,15 @@
+{
+  "_comment": "Per-dynasty slates. Each league has its own week + matchups. 'home'/'away' are coach names from members.json; set 'away' to \"CPU\" for a user-vs-CPU game. A game is marked likely-played once both coaches have streamed that team's dynasty this week.",
+  "rebuild": {
+    "week": 6,
+    "seasonYear": 2027,
+    "matchups": [
+      { "home": "Blake", "away": "Marcus" }
+    ]
+  },
+  "fivestar": {
+    "week": 1,
+    "seasonYear": 2027,
+    "matchups": []
+  }
+}

@@ -1,0 +1,348 @@
+// Dynasty Ticker — live Twitch board + weekly activity tracker for an NCAA 27 dynasty.
+// Pure Node + Express. No native deps, no database engine — sessions are logged to a JSON file.
+//
+// Run:  npm install  then  npm start
+// Try it with fake data first (no Twitch keys needed):  npm run mock
+
+import express from "express";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import * as scorewatch from "./scorewatch.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ---------- tiny .env loader (avoids adding a dependency) ----------
+function loadEnv() {
+  const p = path.join(__dirname, ".env");
+  if (!fs.existsSync(p)) return;
+  for (const line of fs.readFileSync(p, "utf8").split("\n")) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+  }
+}
+loadEnv();
+
+const MOCK = process.env.MOCK === "1";
+const CLIENT_ID = process.env.TWITCH_CLIENT_ID;
+const CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
+const GAME_NAME = (process.env.DYNASTY_GAME_NAME || "").trim();
+const POLL_SECONDS = Number(process.env.POLL_SECONDS || 45);
+const PORT = Number(process.env.PORT || 3000);
+// DATA_DIR lets the activity log live on a persistent cloud volume so weekly
+// history survives restarts/redeploys. Falls back to the app folder locally.
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const LOG_FILE = path.join(DATA_DIR, "sessions.json");
+
+// ---------- config files ----------
+const readJson = (f, fallback) => {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, f), "utf8")); }
+  catch { return fallback; }
+};
+const getMembers = () => readJson("members.json", { members: [] }).members;
+// schedule.json is now keyed by dynasty: { rebuild: {week, seasonYear, matchups}, fivestar: {...} }.
+const getSchedule = () => readJson("schedule.json", {});
+const getScheduleFor = (dyn) => getSchedule()[dyn] || { week: 0, seasonYear: null, matchups: [] };
+const getStandings = () => readJson("standings.json", { teams: {} });
+
+// ---------- session log (append-only JSON) ----------
+// Each record: { twitch, coach, team, game, title, startedAt, lastSeen, week }
+function readLog() {
+  try { return JSON.parse(fs.readFileSync(LOG_FILE, "utf8")); } catch { return []; }
+}
+function writeLog(rows) {
+  fs.writeFileSync(LOG_FILE, JSON.stringify(rows, null, 2));
+}
+
+// Live snapshot, refreshed by the poller.
+let liveSnapshot = { updatedAt: null, streams: [] };
+
+// ---------- Twitch auth (client-credentials app token) ----------
+let appToken = null;
+let tokenExpiresAt = 0;
+async function getToken() {
+  if (appToken && Date.now() < tokenExpiresAt - 60000) return appToken;
+  const url = `https://id.twitch.tv/oauth2/token?client_id=${CLIENT_ID}` +
+    `&client_secret=${CLIENT_SECRET}&grant_type=client_credentials`;
+  const res = await fetch(url, { method: "POST" });
+  if (!res.ok) throw new Error(`Twitch token error ${res.status}: ${await res.text()}`);
+  const j = await res.json();
+  appToken = j.access_token;
+  tokenExpiresAt = Date.now() + j.expires_in * 1000;
+  return appToken;
+}
+
+// ---------- fetch who is live ----------
+async function fetchLiveStreams(logins) {
+  if (MOCK) return mockStreams(logins);
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    console.warn("No Twitch keys set — falling back to mock data. Copy .env.example to .env.");
+    return mockStreams(logins);
+  }
+  const token = await getToken();
+  const out = [];
+  // Twitch allows up to 100 user_login params per call; chunk to be safe.
+  for (let i = 0; i < logins.length; i += 100) {
+    const chunk = logins.slice(i, i + 100);
+    const qs = chunk.map(l => `user_login=${encodeURIComponent(l)}`).join("&");
+    const res = await fetch(`https://api.twitch.tv/helix/streams?first=100&${qs}`, {
+      headers: { "Client-Id": CLIENT_ID, Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error(`Twitch streams error ${res.status}: ${await res.text()}`);
+    const j = await res.json();
+    out.push(...j.data);
+  }
+  return out;
+}
+
+// ---------- poll loop: refresh live board + log sessions ----------
+async function poll() {
+  try {
+    const members = getMembers();
+    const byLogin = new Map(members.map(m => [m.twitch.toLowerCase(), m]));
+    const raw = await fetchLiveStreams([...byLogin.keys()]);
+    const now = new Date().toISOString();
+
+    const streams = raw.map(s => {
+      const m = byLogin.get((s.user_login || "").toLowerCase()) || {};
+      // lenient game match: exact, substring, or any "college football" title so
+      // a slightly different Twitch category name still counts.
+      const cat = (s.game_name || "").toLowerCase();
+      const g = (GAME_NAME || "").toLowerCase();
+      const onDynasty = !GAME_NAME || cat === g || cat.includes(g) || cat.includes("college football");
+      return {
+        twitch: s.user_login,
+        displayName: s.user_name,
+        coach: m.coach || s.user_name,
+        // A coach now has two teams (one per dynasty). Which one this stream is
+        // gets resolved from the scoreboard, so leave team blank until then.
+        teams: m.teams || {},
+        team: "",
+        game: s.game_name || "",
+        title: s.title || "",
+        viewers: s.viewer_count || 0,
+        startedAt: s.started_at,
+        onDynasty,
+        thumbnail: (s.thumbnail_url || "").replace("{width}", "320").replace("{height}", "180"),
+        url: `https://twitch.tv/${s.user_login}`
+      };
+    });
+
+    liveSnapshot = { updatedAt: now, streams };
+    logSessions(streams, now);
+    console.log(`[${now}] ${streams.length} live (${streams.filter(s => s.onDynasty).length} on dynasty)`);
+  } catch (e) {
+    console.error("Poll failed:", e.message);
+  }
+}
+
+// Merge current live streams into the append-only session log.
+// A session = a continuous stream. We match on twitch+startedAt so a single
+// stream is one row whose lastSeen keeps advancing while they're live.
+function logSessions(streams, now) {
+  const rows = readLog();
+  // The league a stream belongs to comes from the scoreboard read, which the
+  // score loop resolves. Read the latest resolved dynasty/team for each stream;
+  // it may be null early (before the bug is read) and get backfilled next poll.
+  const liveScores = scorewatch.getScores();
+  for (const s of streams) {
+    if (GAME_NAME && !s.onDynasty) continue; // only log dynasty play
+    const sc = liveScores[s.twitch.toLowerCase()];
+    const dynasty = (sc && sc.dynasty) || null;
+    const team = (sc && sc.team) || s.team || "";
+    const week = dynasty ? (getScheduleFor(dynasty).week ?? null) : null;
+    const key = r => r.twitch === s.twitch && r.startedAt === s.startedAt;
+    let row = rows.find(key);
+    if (row) {
+      row.lastSeen = now;
+      row.title = s.title;
+      // once the scoreboard tells us the league, fill it in on the session
+      if (!row.dynasty && dynasty) { row.dynasty = dynasty; row.week = week; row.team = team; }
+    } else {
+      rows.push({
+        twitch: s.twitch, coach: s.coach, team, game: s.game, dynasty,
+        title: s.title, startedAt: s.startedAt, lastSeen: now, week
+      });
+    }
+  }
+  writeLog(rows);
+}
+
+// ---------- weekly rollup ----------
+function weeklyRollup(dynasty) {
+  const rows = readLog();
+  // Only coaches who have a team in THIS league appear in its weekly table.
+  const members = getMembers().filter(m => m.teams && m.teams[dynasty]);
+  const schedule = getScheduleFor(dynasty);
+  const week = schedule.week;
+
+  // Per-coach totals for the current week, in this league only.
+  const stat = new Map();
+  const ensure = c => stat.get(c) || stat.set(c, { coach: c, sessions: 0, minutes: 0, lastSeen: null }).get(c);
+  for (const r of rows.filter(r => r.dynasty === dynasty && r.week === week)) {
+    const s = ensure(r.coach);
+    s.sessions += 1;
+    s.minutes += Math.max(0, Math.round((new Date(r.lastSeen) - new Date(r.startedAt)) / 60000));
+    if (!s.lastSeen || r.lastSeen > s.lastSeen) s.lastSeen = r.lastSeen;
+  }
+
+  // Everyone in this league, even those who haven't played, so "who's behind" is visible.
+  const activity = members.map(m => {
+    const s = stat.get(m.coach) || { sessions: 0, minutes: 0, lastSeen: null };
+    return { coach: m.coach, team: m.teams[dynasty], twitch: m.twitch, ...s, played: s.sessions > 0 };
+  }).sort((a, b) => b.minutes - a.minutes);
+
+  // Matchup progress: a game is "likely played" when both sides have logged play this week.
+  const played = new Set(activity.filter(a => a.played).map(a => a.coach));
+  const matchups = (schedule.matchups || []).map(mu => {
+    const homePlayed = played.has(mu.home);
+    const awayPlayed = mu.away === "CPU" ? homePlayed : played.has(mu.away);
+    return { ...mu, homePlayed, awayPlayed, likelyPlayed: homePlayed && awayPlayed };
+  });
+
+  return { dynasty, week, seasonYear: schedule.seasonYear, activity, matchups };
+}
+
+// ---------- mock data for a keyless test drive ----------
+function mockStreams(logins) {
+  const g = GAME_NAME || "EA Sports College Football 27";
+  const pick = logins.slice(0, Math.max(1, Math.floor(logins.length / 2)));
+  const startedAgo = mins => new Date(Date.now() - mins * 60000).toISOString();
+  return pick.map((login, i) => ({
+    user_login: login,
+    user_name: login,
+    game_name: i === pick.length - 1 ? "Just Chatting" : g, // one off-game to show filtering
+    title: i === pick.length - 1 ? "hanging out" : `Dynasty Week ${getScheduleFor("rebuild").week || 1} — rivalry game`,
+    viewer_count: 5 + i * 3,
+    started_at: startedAgo(20 + i * 15),
+    thumbnail_url: ""
+  }));
+}
+
+// ---------- web server ----------
+const app = express();
+app.use(express.json());
+// Live data must never be cached by the browser or any edge/proxy, or viewers
+// (and the app's 20s refresh) can show a stale score.
+app.use("/api", (_req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.set("Pragma", "no-cache");
+  next();
+});
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res, filePath) => {
+    // always revalidate the app page so a new deploy shows without a hard refresh
+    if (filePath.endsWith(".html")) res.set("Cache-Control", "no-cache, must-revalidate");
+  }
+}));
+
+// Live board.
+// Default (loose): show a roster coach's College Football stream, and hide it
+// ONLY when the scoreboard clearly shows a different team (another dynasty).
+// STRICT_DYNASTY=1 flips to confirm-to-show (only streams whose scoreboard
+// matched the coach's team appear) — use once OCR is reliable across streams.
+const STRICT = process.env.STRICT_DYNASTY === "1";
+app.get("/api/live", (_req, res) => {
+  const decorated = scorewatch.decorate(liveSnapshot.streams);
+  const shown = decorated.filter(s => {
+    if (!s.onDynasty) return false;               // not a College Football stream
+    const sc = s.score;
+    if (STRICT) return !!(sc && sc.dynastyConfirmed);
+    // loose: only drop streams the scoreboard positively identifies as another team
+    if (sc && sc.away && sc.home && !sc.dynastyConfirmed) return false;
+    return true;
+  });
+  res.json({ updatedAt: liveSnapshot.updatedAt, streams: shown });
+});
+
+// Debug: raw view of every roster stream Twitch reports, with category + score.
+app.get("/api/debug", (_req, res) => {
+  res.json({
+    updatedAt: liveSnapshot.updatedAt,
+    gameName: GAME_NAME,
+    strict: STRICT,
+    streams: scorewatch.decorate(liveSnapshot.streams).map(s => ({
+      coach: s.coach, team: s.team, twitch: s.twitch,
+      game: s.game, onDynasty: s.onDynasty,
+      score: s.score ? { away: s.score.away, home: s.score.home, confirmed: s.score.dynastyConfirmed, source: s.score.source } : null,
+    })),
+  });
+});
+// One-off Discord test through the configured webhook (gated by a simple key).
+app.get("/api/test-alert", async (req, res) => {
+  if (req.query.key !== "gameday") return res.status(403).json({ error: "bad key" });
+  res.json(await scorewatch.sendTestAlert());
+});
+// ?dynasty=rebuild|fivestar for one league; omit for both.
+app.get("/api/weekly", (req, res) => {
+  const d = req.query.dynasty;
+  if (d) return res.json(weeklyRollup(d));
+  res.json({ rebuild: weeklyRollup("rebuild"), fivestar: weeklyRollup("fivestar") });
+});
+app.get("/api/schedule", (req, res) => {
+  const d = req.query.dynasty;
+  res.json(d ? getScheduleFor(d) : getSchedule());
+});
+app.get("/api/members", (_req, res) => res.json({ members: getMembers() }));
+app.get("/api/standings", (_req, res) => res.json(getStandings()));
+
+// Editing/clearing scores requires a shared password so players can't wipe scores.
+const SUBMIT_PW = process.env.SUBMIT_PASSWORD || "SYBAU";
+const pwOK = req => (req.body && req.body.password === SUBMIT_PW) || req.get("x-edit-password") === SUBMIT_PW;
+
+// Completed games (auto-archived when a stream ends).
+app.get("/api/finals", (_req, res) => res.json({ finals: scorewatch.getFinals() }));
+// Commissioner: clear ALL finals (rolling to a new week). Password-protected.
+app.delete("/api/finals", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  scorewatch.clearAllFinals(); res.json({ ok: true });
+});
+// Commissioner: add a completed game to the Final board (gated by a simple key).
+app.get("/api/finals/add", (req, res) => {
+  if (req.query.key !== "gameday") return res.status(403).json({ error: "bad key" });
+  res.json(scorewatch.addFinal({
+    away: req.query.away, home: req.query.home,
+    awayScore: req.query.as, homeScore: req.query.hs,
+    coach: req.query.coach, team: req.query.team,
+  }));
+});
+// Commissioner: create a completed game on the Final board from the admin UI
+// (password-protected, same shared submit password as every other admin edit).
+app.post("/api/finals", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  const b = req.body || {};
+  if (!b.away || !b.home) return res.status(400).json({ error: "away and home required" });
+  res.json(scorewatch.addFinal({
+    away: b.away, home: b.home,
+    awayScore: b.awayScore, homeScore: b.homeScore,
+    coach: b.coach, team: b.team,
+  }));
+});
+app.post("/api/final/:id", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  res.json(scorewatch.editFinal(req.params.id, req.body || {}) || {});
+});
+app.delete("/api/final/:id", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  scorewatch.removeFinal(req.params.id); res.json({ ok: true });
+});
+
+// Manual live score override (always beats the camera read until cleared).
+app.post("/api/score/:twitch", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  res.json(scorewatch.setManual(req.params.twitch, req.body || {}));
+});
+app.delete("/api/score/:twitch", (req, res) => {
+  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  scorewatch.clearScore(req.params.twitch); res.json({ ok: true });
+});
+
+scorewatch.initStore(DATA_DIR);
+
+app.listen(PORT, () => {
+  console.log(`Dynasty Ticker running at http://localhost:${PORT}  ${MOCK ? "(MOCK MODE)" : ""}`);
+  poll();
+  setInterval(poll, POLL_SECONDS * 1000);
+  scorewatch.startLoop(() => liveSnapshot.streams);
+});
