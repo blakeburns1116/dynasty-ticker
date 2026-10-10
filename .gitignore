@@ -1,0 +1,7 @@
+node_modules/
+.env
+# runtime data (lives on the Railway volume via DATA_DIR)
+sessions.json
+scores.json
+finals.json
+__pycache__/

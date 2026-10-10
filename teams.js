@@ -84,41 +84,6 @@ const fsim = (o, a) => {
   return sim(o, a);
 };
 
-// Does an OCR'd team string refer to `teamName`?
-// Exact / full-alias-contained, then a fuzzy fallback (>=0.62 similar) for garbled
-// reads. Threshold tuned so lookalikes stay apart (e.g. Texas State vs Texas A&M).
-export function matchesTeam(ocrText, teamName) {
-  const o = norm(ocrText);
-  if (!o) return false;
-  const aliases = (TEAM_ALIASES[teamName] || [teamName]).map(norm);
-  // exact, or the alias is contained in the read but only a few garble chars longer
-  // (so "louisianatech" doesn't match "louisiana", "michiganstate" not "michigan")
-  if (aliases.some(a => a === o || (a.length >= 4 && o.includes(a) && o.length - a.length <= 3))) return true;
-  // fuzzy only against full names (>=8 chars) AND only when the lengths are close,
-  // so a bare name never matches its "State" sibling (Washington vs Washington State).
-  if (o.length >= 6 && aliases.some(a => a.length >= 8 && Math.abs(o.length - a.length) <= 2 && !a.startsWith(o) && fsim(o, a) >= 0.62)) return true;
-  return false;
-}
-
-// Confirm a scoreboard read belongs to a coach's dynasty team.
-export function scoreConfirmsTeam(score, teamName) {
-  if (!score) return false;
-  return matchesTeam(score.away, teamName) || matchesTeam(score.home, teamName);
-}
-
-// A coach now has a team in each dynasty ({ rebuild, fivestar }). Since the two
-// are always different schools, the team on the scoreboard tells us which league
-// this stream is. Returns { dynasty, team } for the first assigned team that
-// appears on the bug, or null if neither has been read yet.
-export function confirmDynasty(score, teams) {
-  if (!score || !teams) return null;
-  for (const dynasty of ["rebuild", "fivestar"]) {
-    const team = teams[dynasty];
-    if (team && scoreConfirmsTeam(score, team)) return { dynasty, team };
-  }
-  return null;
-}
-
 // Every other FBS school (normalized), so the server can tell when an OCR'd name
 // is a real, "certified" school and lock it in. Mirrors the color map in the UI.
 const FBS_NAMES = [
@@ -144,47 +109,288 @@ const FBS_NAMES = [
   "missstate","scarolina","ncarolina",
 ];
 
+// Display names for FBS schools (same names the page's color map uses), and
+// alternate on-screen spellings that point at a base key.
+export const FBS_DISPLAY = {
+  "alabama": "Alabama",
+  "arkansas": "Arkansas",
+  "auburn": "Auburn",
+  "florida": "Florida",
+  "georgia": "Georgia",
+  "kentucky": "Kentucky",
+  "lsu": "LSU",
+  "mississippistate": "Mississippi State",
+  "missouri": "Missouri",
+  "oklahoma": "Oklahoma",
+  "olemiss": "Ole Miss",
+  "southcarolina": "South Carolina",
+  "tennessee": "Tennessee",
+  "texas": "Texas",
+  "texasam": "Texas A&M",
+  "vanderbilt": "Vanderbilt",
+  "illinois": "Illinois",
+  "indiana": "Indiana",
+  "iowa": "Iowa",
+  "maryland": "Maryland",
+  "michigan": "Michigan",
+  "michiganstate": "Michigan State",
+  "minnesota": "Minnesota",
+  "nebraska": "Nebraska",
+  "northwestern": "Northwestern",
+  "ohiostate": "Ohio State",
+  "oregon": "Oregon",
+  "pennstate": "Penn State",
+  "purdue": "Purdue",
+  "rutgers": "Rutgers",
+  "ucla": "UCLA",
+  "usc": "USC",
+  "washington": "Washington",
+  "wisconsin": "Wisconsin",
+  "arizona": "Arizona",
+  "arizonastate": "Arizona State",
+  "baylor": "Baylor",
+  "byu": "BYU",
+  "cincinnati": "Cincinnati",
+  "colorado": "Colorado",
+  "houston": "Houston",
+  "iowastate": "Iowa State",
+  "kansas": "Kansas",
+  "kansasstate": "Kansas State",
+  "oklahomastate": "Oklahoma State",
+  "tcu": "TCU",
+  "texastech": "Texas Tech",
+  "ucf": "UCF",
+  "utah": "Utah",
+  "westvirginia": "West Virginia",
+  "bostoncollege": "Boston College",
+  "california": "California",
+  "clemson": "Clemson",
+  "duke": "Duke",
+  "floridastate": "Florida State",
+  "georgiatech": "Georgia Tech",
+  "louisville": "Louisville",
+  "miami": "Miami",
+  "ncstate": "NC State",
+  "northcarolina": "North Carolina",
+  "pittsburgh": "Pittsburgh",
+  "smu": "SMU",
+  "stanford": "Stanford",
+  "syracuse": "Syracuse",
+  "virginia": "Virginia",
+  "virginiatech": "Virginia Tech",
+  "wakeforest": "Wake Forest",
+  "notredame": "Notre Dame",
+  "uconn": "UConn",
+  "umass": "UMass",
+  "army": "Army",
+  "navy": "Navy",
+  "airforce": "Air Force",
+  "boisestate": "Boise State",
+  "memphis": "Memphis",
+  "southflorida": "South Florida",
+  "northtexas": "North Texas",
+  "utep": "UTEP",
+  "uab": "UAB",
+  "charlotte": "Charlotte",
+  "marshall": "Marshall",
+  "olddominion": "Old Dominion",
+  "westernkentucky": "Western Kentucky",
+  "middletennessee": "Middle Tennessee",
+  "newmexicostate": "New Mexico State",
+  "samhouston": "Sam Houston",
+  "kennesawstate": "Kennesaw State",
+  "georgiastate": "Georgia State",
+  "southalabama": "South Alabama",
+  "troy": "Troy",
+  "arkansasstate": "Arkansas State",
+  "ulmonroe": "UL Monroe",
+  "akron": "Akron",
+  "bowlinggreen": "Bowling Green",
+  "buffalo": "Buffalo",
+  "centralmichigan": "Central Michigan",
+  "easternmichigan": "Eastern Michigan",
+  "kentstate": "Kent State",
+  "northernillinois": "Northern Illinois",
+  "ohio": "Ohio",
+  "westernmichigan": "Western Michigan",
+  "nevada": "Nevada",
+  "unlv": "UNLV",
+  "newmexico": "New Mexico",
+  "sandiegostate": "San Diego State",
+  "hawaii": "Hawaii",
+  "oregonstate": "Oregon State",
+  "louisianatech": "Louisiana Tech",
+  "delaware": "Delaware",
+  "missouristate": "Missouri State",
+};
+
+const FBS_ALT = {
+  "mississippi": "olemiss",
+  "connecticut": "uconn",
+  "massachusetts": "umass",
+  "louisianamonroe": "ulmonroe",
+  "lamonroe": "ulmonroe",
+  "latech": "louisianatech",
+  "mtsu": "middletennessee",
+  "samhoustonstate": "samhouston",
+  "northcarolinastate": "ncstate",
+  "southerncalifornia": "usc",
+  "salabama": "southalabama",
+  "wkentucky": "westernkentucky",
+  "emichigan": "easternmichigan",
+  "cmichigan": "centralmichigan",
+  "wmichigan": "westernmichigan",
+  "nillinois": "northernillinois",
+  "missstate": "mississippistate",
+  "scarolina": "southcarolina",
+  "ncarolina": "northcarolina",
+};
+
+// ---------------------------------------------------------------------------
+// Alias tables. Built once.
+//
+// WHY THIS EXISTS: the old matcher let any read that merely CONTAINED a short
+// school name (plus up to 3 extra characters) match that school, so "MICHIGAN ST"
+// became Michigan, "FLORIDA ST" became Florida, "MISSISSIPPI ST" became Ole Miss,
+// and so on. Now an exact hit on ANY known school (roster or FBS, including the
+// "ST" abbreviation of every "X State") always wins, and the slack match is
+// refused when the leftover characters look like "ST"/"STATE"/"TECH".
+// ---------------------------------------------------------------------------
+const stVariant = n => (/state$/.test(n) && n.length > 7 ? n.slice(0, -5) + "st" : null);
+
+function aliasesFor(teamName) {
+  const list = (TEAM_ALIASES[teamName] || [teamName]).map(norm).filter(Boolean);
+  const set = new Set([norm(teamName), ...list]);
+  for (const a of [...set]) { const v = stVariant(a); if (v) set.add(v); }
+  return [...set];
+}
+
+// normalized string -> canonical id (roster display name, or FBS base key)
+const KNOWN = new Map();
+for (const name of Object.keys(TEAM_ALIASES))
+  for (const a of aliasesFor(name)) if (!KNOWN.has(a)) KNOWN.set(a, name);
+for (const k of FBS_NAMES) {
+  const base = FBS_ALT[k] || k;
+  if (!KNOWN.has(k)) KNOWN.set(k, KNOWN.get(base) || base);
+  const v = stVariant(k);
+  if (v && !KNOWN.has(v)) KNOWN.set(v, KNOWN.get(base) || base);
+}
+// canonical id of any team string we are asked about (roster name or FBS key)
+const canonOf = teamName => KNOWN.get(norm(teamName)) || norm(teamName);
+
+// Leftover characters after an alias that signal a DIFFERENT school ("... ST",
+// "... STATE", "... TECH"), so slack containment must not apply.
+const blocksSlack = (o, a) => /^(st|tech)/.test(o.replace(a, ""));
+
+// Does an OCR'd team string refer to `teamName`?
+// Exact, then guarded slack containment, then a fuzzy fallback (>=0.62 similar).
+export function matchesTeam(ocrText, teamName) {
+  const o = norm(ocrText);
+  if (!o) return false;
+  const aliases = aliasesFor(teamName);
+  if (aliases.includes(o)) return true;
+  // the read is exactly some OTHER known school (or its ST abbreviation): not us
+  const ex = KNOWN.get(o);
+  if (ex && ex !== canonOf(teamName)) return false;
+  const loose =
+    aliases.some(a => a.length >= 4 && o.includes(a) && o.length - a.length <= 3 && !blocksSlack(o, a)) ||
+    (o.length >= 6 && aliases.some(a => a.length >= 8 && Math.abs(o.length - a.length) <= 2 && !a.startsWith(o) && fsim(o, a) >= 0.62));
+  if (!loose) return false;
+  // a loose match only counts if no OTHER school explains the read better
+  const any = resolveAny(o);
+  return !any || any === canonOf(teamName);
+}
+
+// Confirm a scoreboard read belongs to a coach's dynasty team.
+export function scoreConfirmsTeam(score, teamName) {
+  if (!score) return false;
+  return matchesTeam(score.away, teamName) || matchesTeam(score.home, teamName);
+}
+
+// A coach now has a team in each dynasty ({ rebuild, fivestar }). Since the two
+// are always different schools, the team on the scoreboard tells us which league
+// this stream is. Returns { dynasty, team } for the first assigned team that
+// appears on the bug, or null if neither has been read yet.
+export function confirmDynasty(score, teams) {
+  if (!score || !teams) return null;
+  for (const dynasty of ["rebuild", "fivestar"]) {
+    const team = teams[dynasty];
+    if (team && scoreConfirmsTeam(score, team)) return { dynasty, team };
+  }
+  return null;
+}
+
+// Map an OCR'd team string to its canonical roster name (or null).
+export function resolveTeam(ocrText) {
+  const o = norm(ocrText);
+  if (!o) return null;
+  // exact hit on any known school wins outright (roster -> name, FBS -> not roster)
+  const ex = KNOWN.get(o);
+  if (ex) return TEAM_ALIASES[ex] ? ex : null;
+  // Garble tolerance. Every (school, alias) pair is scored and the BEST one wins,
+  // instead of the first slack match: "TEXASAGM" contains "texas" but is far closer
+  // to "texas a and m", so it must be Texas A&M, not Texas.
+  //   contained alias (<=3 junk chars, not an ST/STATE/TECH tail): a.length / o.length
+  //   fuzzy similarity (full names only, similar length):           fsim(o, a) >= 0.62
+  let best = null, bs = 0;
+  for (const name of Object.keys(TEAM_ALIASES)) {
+    for (const a of aliasesFor(name)) {
+      let s = 0;
+      if (a.length >= 4 && o.includes(a) && o.length - a.length <= 3 && !blocksSlack(o, a)) s = a.length / o.length;
+      if (o.length >= 6 && a.length >= 8 && Math.abs(o.length - a.length) <= 2 && !a.startsWith(o)) {
+        const f = fsim(o, a);
+        if (f >= 0.62 && f > s) s = f;
+      }
+      if (s > bs) { bs = s; best = name; }
+    }
+  }
+  return best;
+}
+
 // Is an OCR'd team string a real, recognizable school (roster OR any FBS team)?
-// Returns a canonical-ish key when recognized, else null. Used to LOCK a team
-// name once it's verified so later garbled reads can't overwrite it.
+// Returns a canonical id (roster display name, or FBS base key) when recognized,
+// else null. Used to LOCK a team name once verified so garbled reads can't overwrite it.
 export function resolveAny(ocrText) {
   const roster = resolveTeam(ocrText);
   if (roster) return roster;
   const o = norm(ocrText);
   if (!o) return null;
-  if (FBS_NAMES.includes(o)) return o;
-  for (const k of FBS_NAMES) if (k.length >= 5 && ((o.includes(k) && o.length - k.length <= 3) || k.includes(o))) return k;
+  const ex = KNOWN.get(o);
+  if (ex) return ex;                       // exact FBS school
+  const keys = FBS_NAMES.map(k => FBS_ALT[k] || k).filter((k, i, a) => a.indexOf(k) === i);
+  // clipped read: the text is the start or end of a known name, and every such
+  // name belongs to exactly ONE school ("ICHIGAN", "GEORGIA SOUTH", "TENNESS").
+  // Roster aliases count too, so a truncated roster name can't fall through to a
+  // lookalike FBS school (GEORGIA SOUTH must not become Georgia State).
+  if (o.length >= 5) {
+    const owners = new Set();
+    for (const [alias, canon] of KNOWN) {
+      if (alias.length > o.length && alias.length >= 6 && (alias.startsWith(o) || alias.endsWith(o))) owners.add(canon);
+    }
+    if (owners.size === 1) return [...owners][0];
+  }
+  // school name plus a few junk characters ("ALABAMAXX")
+  for (const k of keys) if (k.length >= 5 && o.includes(k) && o.length - k.length <= 3 && !blocksSlack(o, k)) return k;
+  // fuzzy, accepted only when clearly better than the runner-up
   if (o.length >= 5) {
     let best = null, bs = 0, second = 0;
-    for (const k of FBS_NAMES) { if (k.length < 6 || Math.abs(o.length - k.length) > 2 || k.startsWith(o)) continue; const s = fsim(o, k); if (s > bs) { second = bs; bs = s; best = k; } else if (s > second) second = s; }
+    for (const k of keys) {
+      if (k.length < 6 || Math.abs(o.length - k.length) > 2 || k.startsWith(o)) continue;
+      const s = fsim(o, k);
+      if (s > bs) { second = bs; bs = s; best = k; } else if (s > second) second = s;
+    }
     if (best && bs >= 0.6 && (bs - second) >= 0.08) return best;
   }
   return null;
 }
 
-// Map an OCR'd team string to its canonical roster name (or null). Lets the
-// server build ONE stable matchup key for a head-to-head even when the two
-// coaches' streams OCR the names slightly differently.
-export function resolveTeam(ocrText) {
-  const o = norm(ocrText);
-  if (!o) return null;
-  // strong: an exact/contained alias wins immediately
-  for (const name of Object.keys(TEAM_ALIASES)) {
-    const aliases = (TEAM_ALIASES[name] || [name]).map(norm);
-    if (aliases.some(a => a === o || (a.length >= 4 && o.includes(a) && o.length - a.length <= 3))) return name;
-  }
-  // fuzzy: pick the BEST similarity across full-length aliases (avoids the first
-  // over-threshold alias winning, e.g. garbled "EXASSTATE" -> Texas State not Jax State)
-  if (o.length >= 6) {
-    let best = null, bs = 0;
-    for (const name of Object.keys(TEAM_ALIASES)) {
-      for (const a of (TEAM_ALIASES[name] || [name]).map(norm)) {
-        if (a.length < 8 || Math.abs(o.length - a.length) > 2 || a.startsWith(o)) continue;
-        const s = fsim(o, a);
-        if (s > bs) { bs = s; best = name; }
-      }
-    }
-    if (bs >= 0.62) return best;
-  }
-  return null;
+const titleCase = s => String(s || "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\b[a-z]/g, c => c.toUpperCase());
+
+// Canonical display name for an OCR'd string: roster name ("Texas A&M"), FBS
+// display name ("Michigan State"), or null when it isn't a recognizable school.
+export function schoolName(ocrText) {
+  const id = resolveAny(ocrText);
+  if (!id) return null;
+  if (TEAM_ALIASES[id]) return id;
+  return FBS_DISPLAY[id] || titleCase(id);
 }

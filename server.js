@@ -8,6 +8,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import crypto from "crypto";
 import * as scorewatch from "./scorewatch.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -271,7 +272,7 @@ app.get("/api/debug", (_req, res) => {
 });
 // One-off Discord test through the configured webhook (gated by a simple key).
 app.get("/api/test-alert", async (req, res) => {
-  if (req.query.key !== "gameday") return res.status(403).json({ error: "bad key" });
+  if (!keyOK(req, res)) return;
   res.json(await scorewatch.sendTestAlert());
 });
 // ?dynasty=rebuild|fivestar for one league; omit for both.
@@ -288,19 +289,41 @@ app.get("/api/members", (_req, res) => res.json({ members: getMembers() }));
 app.get("/api/standings", (_req, res) => res.json(getStandings()));
 
 // Editing/clearing scores requires a shared password so players can't wipe scores.
-const SUBMIT_PW = process.env.SUBMIT_PASSWORD || "SYBAU";
-const pwOK = req => (req.body && req.body.password === SUBMIT_PW) || req.get("x-edit-password") === SUBMIT_PW;
+// Secrets come from the environment ONLY. The old defaults ("SYBAU", "gameday") were
+// committed to a public repo, so they must be treated as burned: set new values in
+// Railway. With no SUBMIT_PASSWORD set, every edit endpoint refuses (503) instead of
+// falling back to a known password.
+const SUBMIT_PW = process.env.SUBMIT_PASSWORD || "";
+const ADMIN_KEY = process.env.ADMIN_KEY || "";
+if (!SUBMIT_PW) console.warn("SUBMIT_PASSWORD is not set: score/final edit endpoints are DISABLED.");
+if (!ADMIN_KEY) console.warn("ADMIN_KEY is not set: /api/finals/add and /api/test-alert are DISABLED.");
+const safeEq = (a, b) => {
+  const x = Buffer.from(String(a ?? "")), y = Buffer.from(String(b ?? ""));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+// true when the request carries the right password; sends the refusal itself otherwise
+function pwOK(req, res) {
+  if (!SUBMIT_PW) { res.status(503).json({ error: "editing disabled: SUBMIT_PASSWORD not configured" }); return false; }
+  const given = (req.body && req.body.password) || req.get("x-edit-password");
+  if (!safeEq(given, SUBMIT_PW)) { res.status(403).json({ error: "wrong password" }); return false; }
+  return true;
+}
+function keyOK(req, res) {
+  if (!ADMIN_KEY) { res.status(503).json({ error: "disabled: ADMIN_KEY not configured" }); return false; }
+  if (!safeEq(req.query.key, ADMIN_KEY)) { res.status(403).json({ error: "bad key" }); return false; }
+  return true;
+}
 
 // Completed games (auto-archived when a stream ends).
 app.get("/api/finals", (_req, res) => res.json({ finals: scorewatch.getFinals() }));
 // Commissioner: clear ALL finals (rolling to a new week). Password-protected.
 app.delete("/api/finals", (req, res) => {
-  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  if (!pwOK(req, res)) return;
   scorewatch.clearAllFinals(); res.json({ ok: true });
 });
 // Commissioner: add a completed game to the Final board (gated by a simple key).
 app.get("/api/finals/add", (req, res) => {
-  if (req.query.key !== "gameday") return res.status(403).json({ error: "bad key" });
+  if (!keyOK(req, res)) return;
   res.json(scorewatch.addFinal({
     away: req.query.away, home: req.query.home,
     awayScore: req.query.as, homeScore: req.query.hs,
@@ -310,7 +333,7 @@ app.get("/api/finals/add", (req, res) => {
 // Commissioner: create a completed game on the Final board from the admin UI
 // (password-protected, same shared submit password as every other admin edit).
 app.post("/api/finals", (req, res) => {
-  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  if (!pwOK(req, res)) return;
   const b = req.body || {};
   if (!b.away || !b.home) return res.status(400).json({ error: "away and home required" });
   res.json(scorewatch.addFinal({
@@ -320,21 +343,21 @@ app.post("/api/finals", (req, res) => {
   }));
 });
 app.post("/api/final/:id", (req, res) => {
-  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  if (!pwOK(req, res)) return;
   res.json(scorewatch.editFinal(req.params.id, req.body || {}) || {});
 });
 app.delete("/api/final/:id", (req, res) => {
-  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  if (!pwOK(req, res)) return;
   scorewatch.removeFinal(req.params.id); res.json({ ok: true });
 });
 
 // Manual live score override (always beats the camera read until cleared).
 app.post("/api/score/:twitch", (req, res) => {
-  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  if (!pwOK(req, res)) return;
   res.json(scorewatch.setManual(req.params.twitch, req.body || {}));
 });
 app.delete("/api/score/:twitch", (req, res) => {
-  if (!pwOK(req)) return res.status(403).json({ error: "wrong password" });
+  if (!pwOK(req, res)) return;
   scorewatch.clearScore(req.params.twitch); res.json({ ok: true });
 });
 
@@ -344,5 +367,5 @@ app.listen(PORT, () => {
   console.log(`Dynasty Ticker running at http://localhost:${PORT}  ${MOCK ? "(MOCK MODE)" : ""}`);
   poll();
   setInterval(poll, POLL_SECONDS * 1000);
-  scorewatch.startLoop(() => liveSnapshot.streams);
+  scorewatch.startLoop(() => liveSnapshot);
 });
