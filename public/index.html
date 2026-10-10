@@ -55,6 +55,8 @@
   .badge-live { background:var(--live); color:#fff; font-size:11px; font-weight:800; letter-spacing:.4px;
     padding:3px 8px; border-radius:6px; display:flex; align-items:center; gap:5px; }
   .badge-live .d { width:6px; height:6px; border-radius:50%; background:#fff; animation:pulse 1.5s infinite; }
+  .badge-review { background:#f59e0b; color:#111827; font-size:11px; font-weight:800; letter-spacing:.4px; padding:3px 8px; border-radius:6px; margin-left:6px; cursor:help; }
+  .badge-check { background:#16a34a; color:#fff; font-size:11px; font-weight:800; padding:3px 8px; border-radius:6px; margin-left:6px; }
   .badge-final { background:#0e1526; color:#fff; font-size:11px; font-weight:800; letter-spacing:.4px; padding:3px 8px; border-radius:6px; }
   .eyes { margin-left:auto; color:var(--muted); font-size:13px; font-weight:600; }
 
@@ -631,6 +633,7 @@ async function pwFetch(url, method, body){
   if(pw===null || pw==="") return null;
   const res = await fetch(url,{method, headers:{"Content-Type":"application/json","x-edit-password":pw}, body: body?JSON.stringify(body):undefined});
   if(res.status===403){ PW_CACHE=null; alert("Wrong password — try again."); return null; }
+  if(res.status===503){ PW_CACHE=null; alert("Editing is turned off: the server has no SUBMIT_PASSWORD set yet."); return null; }
   PW_CACHE = pw;
   return res;
 }
@@ -822,13 +825,29 @@ async function clearAllFinals(){
   if(r) refresh();
 }
 
+// Finals the reader wasn't sure about get a "CHECK" badge (hover for why); a final both
+// coaches' streams agreed on gets a green "2 STREAMS". Tapping edit clears the flag.
+const FLAG_TEXT = {
+  "tie":"Tied finals can't happen in college football - the reader likely missed the last score",
+  "missing-score":"A score could not be read",
+  "unverified-team":"A team name could not be matched to a real school",
+  "thin-evidence":"Only a couple of clean reads of this score",
+  "partial-game":"The reader never saw the 4th quarter - this may be a mid-game score",
+  "stream-mismatch":"The two coaches' streams disagree on the score"
+};
+function reviewBadge(g){
+  if(g.needsReview && (g.flags||[]).length && g.source!=="manual")
+    return `<span class="badge-review" title="${esc((g.flags||[]).map(f=>FLAG_TEXT[f]||f).join(' · '))}">CHECK</span>`;
+  if(g.crossChecked) return `<span class="badge-check" title="Both coaches' streams read the same score">2 STREAMS</span>`;
+  return "";
+}
 function finalCard(g){
   const aT = colorFor(g.away);
   const hT = colorFor(g.home);
   const aLead=(g.awayScore??0)>(g.homeScore??0), hLead=(g.homeScore??0)>(g.awayScore??0);
   return `<div class="game">
     <div class="stripe" style="background:linear-gradient(90deg,${aT.c} 50%, ${hT.c} 50%)"></div>
-    <div class="top"><span class="badge-final">FINAL</span><span class="eyes">${fmtAgo(g.endedAt)}</span></div>
+    <div class="top"><span class="badge-final">FINAL</span>${reviewBadge(g)}<span class="eyes">${fmtAgo(g.endedAt)}</span></div>
     <div class="rows">
       ${teamRow(g.away, aT, g.awayScore, aLead)}
       ${teamRow(g.home, hT, g.homeScore, hLead)}
