@@ -82,7 +82,7 @@ WHITELIST = {
     # in parse_int (O->0 is very common for a lone zero score).
     "digits": "0123456789OolIiSB",
     "clock": "0123456789:OolIi",
-    "alpha": "ABCDEFGHIJKLMNOPQRSTUVWXYZ ",
+    "alpha": "ABCDEFGHIJKLMNOPQRSTUVWXYZ&() ",  # & so "TEXAS A&M" is not forced into a letter (it read as TEXASAGM); () for "MIAMI (OH)"
     "quarter": "0123456789STNDRDTHOTHALFIN",
     "downdist": "0123456789STNDRDTHGOAL& ",
 }
